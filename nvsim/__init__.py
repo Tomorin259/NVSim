@@ -6,6 +6,7 @@ from .regulation import hill_activation, hill_repression, compute_alpha
 from .trajectory import make_bifurcation_trajectory, make_linear_trajectory
 from .kinetics import create_kinetic_vectors, initialize_state, validate_positive_vector
 from .programs import AlphaProgram, constant, linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
+from .production import StateProductionProfile
 from .simulate import simulate_bifurcation, simulate_linear
 from .noise import generate_observed_counts
 from .output import make_result_dict, to_anndata
@@ -36,6 +37,7 @@ __all__ = [
     "initialize_state",
     "validate_positive_vector",
     "AlphaProgram",
+    "StateProductionProfile",
     "constant",
     "linear_increase",
     "linear_decrease",

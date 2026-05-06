@@ -35,6 +35,9 @@ This directory contains reproducible scripts for the v0.1 MVP. Generated files a
   `outputs/sergio_yeast400_3master/plots/` for the larger SERGIO-derived GRN.
 - `plot_sergio_grn_multimaster.py`: generates quick-look figures under
   `outputs/sergio_yeast400_multimaster/plots/` for the ten-master SERGIO-derived GRN.
+- `plot_sergio_1200g_ds3_bifurcation.py`: generates quick-look figures under
+  `outputs/sergio_1200g_ds3_bifurcation/plots/` for the SERGIO original
+  1200-gene `targets/regs` dataset routed through NVSim's deterministic ODE path.
 - `plot_sergio_ecoli1200_25master.py`: generates quick-look figures under
   `outputs/sergio_ecoli1200_25master/plots/` for the 25-master Ecoli-1200 GRN.
 
@@ -58,6 +61,7 @@ python examples/plot_sergio_grn_bifurcation.py
 python examples/run_sergio_grn_multimaster.py
 python examples/plot_sergio_grn_multimaster.py
 python examples/run_sergio_1200g_ds3_bifurcation.py
+python examples/plot_sergio_1200g_ds3_bifurcation.py
 python examples/run_sergio_ecoli1200_25master.py
 python examples/plot_sergio_ecoli1200_25master.py
 ```

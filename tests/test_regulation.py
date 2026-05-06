@@ -7,8 +7,8 @@ from nvsim.regulation import compute_alpha, hill_activation, hill_repression
 
 def test_hill_activation_and_repression_are_complements():
     x = np.array([0.0, 1.0, 10.0])
-    act = hill_activation(x, threshold=1.0, hill_coefficient=2.0)
-    rep = hill_repression(x, threshold=1.0, hill_coefficient=2.0)
+    act = hill_activation(x, half_response=1.0, hill_coefficient=2.0)
+    rep = hill_repression(x, half_response=1.0, hill_coefficient=2.0)
 
     assert np.all(np.diff(act) >= 0)
     assert np.all(np.diff(rep) <= 0)
@@ -24,7 +24,7 @@ def test_repression_uses_positive_weight_without_negative_sign():
             "target": ["g2"],
             "weight": [2.0],
             "sign": ["repression"],
-            "threshold": [1.0],
+            "half_response": [1.0],
             "hill_coefficient": [1.0],
         }
     )

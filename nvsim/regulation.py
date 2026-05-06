@@ -24,29 +24,29 @@ def _as_nonnegative_array(values: object, name: str) -> np.ndarray:
     return np.maximum(arr, 0.0)
 
 
-def hill_activation(x: object, threshold: float = 1.0, hill_coefficient: float = 2.0) -> np.ndarray:
+def hill_activation(x: object, half_response: float = 1.0, hill_coefficient: float = 2.0) -> np.ndarray:
     """Hill 激活函数：x^n / (h^n + x^n)。
 
-    x 是 regulator 当前表达量；threshold h 控制半饱和位置；
+    x 是 regulator 当前表达量；half_response h 控制半饱和位置；
     hill_coefficient n 控制曲线陡峭程度。返回值在 [0, 1]。
     """
 
-    if threshold <= 0 or hill_coefficient <= 0:
-        raise ValueError("threshold and hill_coefficient must be positive")
+    if half_response <= 0 or hill_coefficient <= 0:
+        raise ValueError("half_response and hill_coefficient must be positive")
     x_arr = _as_nonnegative_array(x, "x")
     numerator = np.power(x_arr, hill_coefficient)
-    denominator = np.power(threshold, hill_coefficient) + numerator
+    denominator = np.power(half_response, hill_coefficient) + numerator
     return numerator / denominator
 
 
-def hill_repression(x: object, threshold: float = 1.0, hill_coefficient: float = 2.0) -> np.ndarray:
+def hill_repression(x: object, half_response: float = 1.0, hill_coefficient: float = 2.0) -> np.ndarray:
     """Hill 抑制函数：h^n / (h^n + x^n)。
 
     regulator 越高，响应越低。注意这里返回的是非负 gate，
     因此 repression contribution 是 ``weight * H_rep(x)``，不是负数。
     """
 
-    return 1.0 - hill_activation(x, threshold=threshold, hill_coefficient=hill_coefficient)
+    return 1.0 - hill_activation(x, half_response=half_response, hill_coefficient=hill_coefficient)
 
 
 def compute_alpha(
@@ -83,9 +83,9 @@ def compute_alpha(
     for edge in edges.itertuples(index=False):
         x = float(values.get(edge.regulator, 0.0))
         if edge.sign == "activation":
-            response = hill_activation(x, edge.threshold, edge.hill_coefficient)
+            response = hill_activation(x, edge.half_response, edge.hill_coefficient)
         else:
-            response = hill_repression(x, edge.threshold, edge.hill_coefficient)
+            response = hill_repression(x, edge.half_response, edge.hill_coefficient)
         alpha.loc[edge.target] = alpha.get(edge.target, 0.0) + edge.weight * float(response)
 
     alpha = alpha.clip(lower=alpha_min)

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from nvsim.grn import GRN
+from nvsim.production import StateProductionProfile
 from nvsim.programs import linear_decrease, linear_increase
 from nvsim.simulate import simulate_bifurcation
 
@@ -89,3 +90,38 @@ def test_bifurcation_seed_is_reproducible():
     assert np.array_equal(result1["obs"]["time_index"].to_numpy(), result2["obs"]["time_index"].to_numpy())
     assert np.allclose(result1["layers"]["true_spliced"], result2["layers"]["true_spliced"])
     assert np.array_equal(result1["layers"]["spliced"], result2["layers"]["spliced"])
+
+
+def test_bifurcation_can_use_state_production_profile():
+    production = StateProductionProfile(
+        pd.DataFrame(
+            {
+                "g0": [0.4, 1.2, 0.1],
+                "g1": [0.5, 0.2, 1.3],
+            },
+            index=["trunk_state", "branch_0_state", "branch_1_state"],
+        )
+    )
+
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=6,
+        n_branch_cells={"branch_0": 6, "branch_1": 6},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        production_profile=production,
+        trunk_production_state="trunk_state",
+        branch_production_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        seed=41,
+        poisson_observed=False,
+    )
+
+    segments = result["uns"]["segment_time_courses"]
+    assert np.allclose(segments["trunk"]["alpha"][:, 0], 0.4)
+    assert np.allclose(segments["trunk"]["alpha"][:, 1], 0.5)
+    assert np.allclose(segments["branch_0"]["alpha"][:, 0], 1.2)
+    assert np.allclose(segments["branch_0"]["alpha"][:, 1], 0.2)
+    assert np.allclose(segments["branch_1"]["alpha"][:, 0], 0.1)
+    assert np.allclose(segments["branch_1"]["alpha"][:, 1], 1.3)
+    assert result["uns"]["simulation_config"]["production_profile"] is True

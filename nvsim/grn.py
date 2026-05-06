@@ -2,7 +2,7 @@
 
 本模块只负责“网络是什么”，不负责真正计算动力学。
 一张 GRN 表由多条 regulator -> target 边组成，每条边必须包含：
-regulator、target、weight、sign。可选列 hill_coefficient 和 threshold
+regulator、target、weight、sign。可选列 hill_coefficient 和 half_response
 控制 Hill 调控响应的形状。
 
 重要约定：weight 永远是非负数；activation/repression 只决定使用
@@ -21,7 +21,8 @@ import pandas as pd
 from .config import GRNConfig
 
 REQUIRED_COLUMNS = ("regulator", "target", "weight", "sign")
-OPTIONAL_COLUMNS = ("hill_coefficient", "threshold")
+OPTIONAL_COLUMNS = ("hill_coefficient", "half_response", "threshold")
+RETURN_COLUMNS = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
 VALID_SIGNS = {"activation", "repression"}
 _SIGN_ALIASES = {
     "activation": "activation",
@@ -58,7 +59,8 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
     权重非负、Hill 参数为正，并把 sign 统一成标准字符串。
 
     返回值仍然是 DataFrame，但列顺序固定，且缺失的 ``hill_coefficient``
-    和 ``threshold`` 会用 ``GRNConfig`` 默认值补齐。
+    和 ``half_response`` 会用 ``GRNConfig`` 默认值补齐。``threshold`` 是
+    旧接口兼容别名，会和 ``half_response`` 保持一致。
     """
 
     config = config or GRNConfig()
@@ -83,6 +85,12 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
 
     if "hill_coefficient" not in normalized.columns:
         normalized["hill_coefficient"] = config.default_hill_coefficient
+    if "half_response" not in normalized.columns and "threshold" in normalized.columns:
+        normalized["half_response"] = normalized["threshold"]
+    if "threshold" not in normalized.columns and "half_response" in normalized.columns:
+        normalized["threshold"] = normalized["half_response"]
+    if "half_response" not in normalized.columns:
+        normalized["half_response"] = config.default_threshold
     if "threshold" not in normalized.columns:
         normalized["threshold"] = config.default_threshold
 
@@ -94,7 +102,7 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
         if (values <= 0).any():
             raise ValueError(f"GRN column {col!r} must be positive")
 
-    return normalized[list(REQUIRED_COLUMNS + OPTIONAL_COLUMNS)]
+    return normalized[list(RETURN_COLUMNS)]
 
 
 @dataclass(frozen=True)

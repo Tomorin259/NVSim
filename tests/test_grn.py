@@ -18,7 +18,26 @@ def test_validate_grn_fills_defaults_and_normalizes_signs():
 
     assert list(normalized["sign"]) == ["activation", "repression"]
     assert list(normalized["hill_coefficient"]) == [2.0, 2.0]
+    assert list(normalized["half_response"]) == [1.0, 1.0]
     assert list(normalized["threshold"]) == [1.0, 1.0]
+
+
+def test_validate_grn_accepts_half_response_and_keeps_threshold_alias():
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g1"],
+            "target": ["g2"],
+            "weight": [1.0],
+            "sign": ["activation"],
+            "half_response": [2.5],
+            "hill_coefficient": [2.0],
+        }
+    )
+
+    normalized = validate_grn(edges)
+
+    assert normalized.loc[0, "half_response"] == 2.5
+    assert normalized.loc[0, "threshold"] == 2.5
 
 
 def test_validate_grn_rejects_negative_weights():

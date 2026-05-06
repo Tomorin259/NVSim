@@ -456,6 +456,9 @@ def simulate_bifurcation(
     gamma: object | None = None,
     u0: object | None = None,
     s0: object | None = None,
+    production_profile: StateProductionProfile | None = None,
+    trunk_production_state: str | None = None,
+    branch_production_states: Mapping[str, str] | None = None,
     master_programs: Mapping[str, AlphaProgram | float] | None = None,
     branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
     default_master_alpha: float = 0.5,
@@ -474,7 +477,8 @@ def simulate_bifurcation(
     ``uns["segment_time_courses"]`` arrays are timepoints x genes. If no
     ``branch_master_programs`` are supplied, both branches share the same master
     regulator programs and may follow identical dynamics from the inherited
-    state.
+    state. If ``production_profile`` is supplied, trunk source alpha comes from
+    ``trunk_production_state`` and branch source alpha uses each branch state.
     """
 
     branch_labels = ("branch_0", "branch_1")
@@ -489,6 +493,25 @@ def simulate_bifurcation(
         s0_arr,
         programs,
     ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
+    trunk_source_alpha = None
+    branch_source_alpha: dict[str, pd.Series] = {}
+    if production_profile is not None:
+        if trunk_production_state is None:
+            raise ValueError("trunk_production_state must be provided when production_profile is used")
+        if branch_production_states is None:
+            raise ValueError("branch_production_states must be provided when production_profile is used")
+        missing_branches = [branch for branch in branch_labels if branch not in branch_production_states]
+        if missing_branches:
+            raise ValueError(f"branch_production_states missing branches: {missing_branches}")
+        production_profile.validate_master_genes(_master_genes(grn))
+        trunk_source_alpha = production_profile.source_alpha(trunk_production_state, genes=grn.genes)
+        for branch in branch_labels:
+            branch_source_alpha[branch] = production_profile.source_alpha_interpolated(
+                trunk_production_state,
+                branch_production_states[branch],
+                1.0,
+                genes=grn.genes,
+            )
 
     total_program_time = trunk_time + branch_time
     trunk = _simulate_segment(
@@ -504,6 +527,7 @@ def simulate_bifurcation(
         alpha_max=alpha_max,
         time_offset=0.0,
         program_time_end=total_program_time,
+        source_alpha=trunk_source_alpha,
     )
     # bifurcation 的关键：两个 branch 必须继承同一个 trunk terminal state。
     inherited_u = trunk["u"][-1].copy()
@@ -524,6 +548,7 @@ def simulate_bifurcation(
             alpha_max=alpha_max,
             time_offset=trunk_time,
             program_time_end=total_program_time,
+            source_alpha=branch_source_alpha.get(branch),
         )
 
     rng = np.random.default_rng(seed)
@@ -603,6 +628,9 @@ def simulate_bifurcation(
         "integrator": "rk4",
         "alpha_max": alpha_max,
         "default_master_alpha": default_master_alpha,
+        "production_profile": production_profile is not None,
+        "trunk_production_state": trunk_production_state,
+        "branch_production_states": dict(branch_production_states) if branch_production_states is not None else None,
         "branch_master_programs_enabled": branch_master_programs is not None,
         "capture_rate": capture_rate,
         "poisson_observed": poisson_observed,

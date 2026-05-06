@@ -120,8 +120,14 @@ def test_bifurcation_can_use_state_production_profile():
     segments = result["uns"]["segment_time_courses"]
     assert np.allclose(segments["trunk"]["alpha"][:, 0], 0.4)
     assert np.allclose(segments["trunk"]["alpha"][:, 1], 0.5)
-    assert np.allclose(segments["branch_0"]["alpha"][:, 0], 1.2)
-    assert np.allclose(segments["branch_0"]["alpha"][:, 1], 0.2)
-    assert np.allclose(segments["branch_1"]["alpha"][:, 0], 0.1)
-    assert np.allclose(segments["branch_1"]["alpha"][:, 1], 1.3)
+    assert np.isclose(segments["branch_0"]["alpha"][0, 0], 0.4)
+    assert np.isclose(segments["branch_0"]["alpha"][0, 1], 0.5)
+    assert np.isclose(segments["branch_0"]["alpha"][-1, 0], 1.2)
+    assert np.isclose(segments["branch_0"]["alpha"][-1, 1], 0.2)
+    assert np.isclose(segments["branch_1"]["alpha"][0, 0], 0.4)
+    assert np.isclose(segments["branch_1"]["alpha"][0, 1], 0.5)
+    assert np.isclose(segments["branch_1"]["alpha"][-1, 0], 0.1)
+    assert np.isclose(segments["branch_1"]["alpha"][-1, 1], 1.3)
+    assert not np.allclose(segments["branch_0"]["alpha"][0], segments["branch_0"]["alpha"][-1])
+    assert not np.allclose(segments["branch_1"]["alpha"][0], segments["branch_1"]["alpha"][-1])
     assert result["uns"]["simulation_config"]["production_profile"] is True

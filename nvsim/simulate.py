@@ -12,7 +12,7 @@ spliced s(t) -> true velocity。核心方程是：
 
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Callable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -42,6 +42,7 @@ def _alpha_from_state(
     default_master_alpha: float,
     alpha_max: float | None,
     source_alpha: pd.Series | None = None,
+    source_alpha_fn: Callable[[float], pd.Series] | None = None,
 ) -> np.ndarray:
     # 根据当前 spliced 状态 s(t) 重新计算 alpha(t)。
     # master 的 alpha 优先来自 source_alpha；否则来自时间程序。
@@ -51,7 +52,9 @@ def _alpha_from_state(
     # basal 先全设为 0；只有 master gene 会写入外部 alpha program。
     # target gene 的 alpha 不直接指定，而由 compute_alpha 累加 GRN 贡献。
     basal = pd.Series(0.0, index=pd.Index(genes, name="gene"), dtype=float)
-    if source_alpha is not None:
+    if source_alpha_fn is not None:
+        basal.update(source_alpha_fn(t).reindex(genes, fill_value=0.0))
+    elif source_alpha is not None:
         basal.update(source_alpha.reindex(genes, fill_value=0.0))
     else:
         for gene in _master_genes(grn):
@@ -74,12 +77,15 @@ def _derivative(
     default_master_alpha: float,
     alpha_max: float | None,
     source_alpha: pd.Series | None = None,
+    source_alpha_fn: Callable[[float], pd.Series] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     # y 是拼接状态向量：[u_1...u_G, s_1...s_G]。
     n_genes = len(beta)
     u = np.maximum(y[:n_genes], 0.0)
     s = np.maximum(y[n_genes:], 0.0)
-    alpha = _alpha_from_state(s, t, time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha)
+    alpha = _alpha_from_state(
+        s, t, time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha, source_alpha_fn
+    )
     # RNA velocity 方程：du/dt -> true_velocity_u；ds/dt -> true_velocity。
     du = alpha - beta * u
     ds = beta * u - gamma * s
@@ -98,10 +104,13 @@ def _rk4_step(
     default_master_alpha: float,
     alpha_max: float | None,
     source_alpha: pd.Series | None = None,
+    source_alpha_fn: Callable[[float], pd.Series] | None = None,
 ) -> np.ndarray:
     """执行一步 RK4；每个中间状态都会重新通过 GRN 计算 alpha。"""
 
-    k1, _ = _derivative(y, t, time_end, grn, beta, gamma, master_programs, default_master_alpha, alpha_max, source_alpha)
+    k1, _ = _derivative(
+        y, t, time_end, grn, beta, gamma, master_programs, default_master_alpha, alpha_max, source_alpha, source_alpha_fn
+    )
     k2, _ = _derivative(
         y + 0.5 * dt * k1,
         t + 0.5 * dt,
@@ -113,6 +122,7 @@ def _rk4_step(
         default_master_alpha,
         alpha_max,
         source_alpha,
+        source_alpha_fn,
     )
     k3, _ = _derivative(
         y + 0.5 * dt * k2,
@@ -125,6 +135,7 @@ def _rk4_step(
         default_master_alpha,
         alpha_max,
         source_alpha,
+        source_alpha_fn,
     )
     k4, _ = _derivative(
         y + dt * k3,
@@ -137,6 +148,7 @@ def _rk4_step(
         default_master_alpha,
         alpha_max,
         source_alpha,
+        source_alpha_fn,
     )
     y_next = y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     return np.maximum(y_next, 0.0)
@@ -168,6 +180,7 @@ def _simulate_segment(
     time_offset: float = 0.0,
     program_time_end: float | None = None,
     source_alpha: pd.Series | None = None,
+    source_alpha_fn: Callable[[float], pd.Series] | None = None,
 ) -> dict[str, np.ndarray]:
     """Simulate one linear segment and return timepoints x genes arrays.
 
@@ -196,7 +209,15 @@ def _simulate_segment(
     u[0] = np.maximum(u0, 0.0)
     s[0] = np.maximum(s0, 0.0)
     alpha[0] = _alpha_from_state(
-        s[0], global_time[0], alpha_time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha
+        s[0],
+        global_time[0],
+        alpha_time_end,
+        grn,
+        master_programs,
+        default_master_alpha,
+        alpha_max,
+        source_alpha,
+        source_alpha_fn,
     )
     # true_velocity 是 spliced velocity ds/dt；true_velocity_u 是 unspliced velocity du/dt。
     velocity[0] = beta * u[0] - gamma * s[0]
@@ -216,11 +237,20 @@ def _simulate_segment(
             default_master_alpha,
             alpha_max,
             source_alpha,
+            source_alpha_fn,
         )
         u[step] = y[:n_genes]
         s[step] = y[n_genes:]
         alpha[step] = _alpha_from_state(
-            s[step], global_time[step], alpha_time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha
+            s[step],
+            global_time[step],
+            alpha_time_end,
+            grn,
+            master_programs,
+            default_master_alpha,
+            alpha_max,
+            source_alpha,
+            source_alpha_fn,
         )
         velocity[step] = beta * u[step] - gamma * s[step]
         true_velocity_u[step] = alpha[step] - beta * u[step]
@@ -315,6 +345,24 @@ def _merge_programs(
     if overrides:
         merged.update(coerce_programs(overrides))
     return merged
+
+
+def _branch_source_alpha_fn(
+    production_profile: StateProductionProfile,
+    trunk_state: str,
+    branch_state: str,
+    trunk_time: float,
+    branch_time: float,
+    genes: tuple[str, ...],
+) -> Callable[[float], pd.Series]:
+    def resolve(global_t: float) -> pd.Series:
+        if branch_time <= 0:
+            fraction = 1.0
+        else:
+            fraction = float(np.clip((global_t - trunk_time) / branch_time, 0.0, 1.0))
+        return production_profile.source_alpha_interpolated(trunk_state, branch_state, fraction, genes=genes)
+
+    return resolve
 
 
 def simulate_linear(
@@ -494,7 +542,7 @@ def simulate_bifurcation(
         programs,
     ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
     trunk_source_alpha = None
-    branch_source_alpha: dict[str, pd.Series] = {}
+    branch_source_alpha_fns: dict[str, Callable[[float], pd.Series]] = {}
     if production_profile is not None:
         if trunk_production_state is None:
             raise ValueError("trunk_production_state must be provided when production_profile is used")
@@ -506,11 +554,13 @@ def simulate_bifurcation(
         production_profile.validate_master_genes(_master_genes(grn))
         trunk_source_alpha = production_profile.source_alpha(trunk_production_state, genes=grn.genes)
         for branch in branch_labels:
-            branch_source_alpha[branch] = production_profile.source_alpha_interpolated(
+            branch_source_alpha_fns[branch] = _branch_source_alpha_fn(
+                production_profile,
                 trunk_production_state,
                 branch_production_states[branch],
-                1.0,
-                genes=grn.genes,
+                trunk_time,
+                branch_time,
+                grn.genes,
             )
 
     total_program_time = trunk_time + branch_time
@@ -548,7 +598,7 @@ def simulate_bifurcation(
             alpha_max=alpha_max,
             time_offset=trunk_time,
             program_time_end=total_program_time,
-            source_alpha=branch_source_alpha.get(branch),
+            source_alpha_fn=branch_source_alpha_fns.get(branch),
         )
 
     rng = np.random.default_rng(seed)

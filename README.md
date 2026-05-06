@@ -1,63 +1,120 @@
 # NVSim
 
-Lightweight GRN-aware RNA velocity simulator.
+NVSim is a lightweight GRN-aware RNA velocity simulator.
 
-## Quick-look plotting notes
+The current public checkpoint focuses on a transparent modeling chain:
 
-NVSim plotting utilities in `nvsim.plotting` are intended for qualitative inspection, not publication-ready velocity inference.
+```text
+GRN -> alpha(t) -> unspliced/spliced ODE -> true velocity -> snapshot cells -> observed layers
+```
 
-- Layer matrices use the convention `cells x genes`.
-- Phase portraits default to `mode="true"`, using `true_unspliced` and `true_spliced`, because observed UMI counts can become highly discrete after capture and Poisson noise. Use `mode="observed"` when you specifically want to inspect the noisy observed counts.
-- PCA on `true_spliced` is the default view for checking smooth simulated dynamics.
-- PCA or UMAP on observed `spliced` is useful for checking what downstream methods would see, but UMAP from sparse/noisy observed counts can fragment simple trajectories.
-- Velocity arrows in `plot_embedding_with_velocity` default to PCA. They are PCA-projected quick-look diagnostics, not full scVelo-style velocity embedding. If `method="umap"` is explicitly requested, the arrows remain PCA-projected and are only overlaid on UMAP coordinates for qualitative visualization.
+It is intentionally smaller than SERGIO, VeloSim, dyngen, or scVelo-style pipelines. The goal of v0.1 is a clear benchmark scaffold with inspectable ground truth, not a full biological simulator.
 
-Run:
+## Overview
+
+- Explicit GRN input with regulator, target, sign, weight, threshold, and Hill coefficient.
+- Master-regulator programs for genes without incoming edges.
+- Deterministic ODE dynamics for unspliced and spliced RNA.
+- Separate true and observed layers.
+- Linear and trunk-to-two-branch bifurcation examples.
+- Optional AnnData export and quick-look plotting utilities.
+
+## Install
+
+Python 3.10 or newer is required.
+
+Core install:
 
 ```bash
+pip install -e .
+```
+
+Development install with tests and optional plotting dependencies:
+
+```bash
+pip install -e .[dev]
+```
+
+## Quick Start
+
+Run the small linear example:
+
+```bash
+python examples/run_mvp_linear.py
 python examples/plot_linear.py
 ```
 
-This writes PNG files under `examples/plots_linear/`:
+Run the bifurcation example:
 
-- `true/`: primary scientific diagnostics. Start with `embedding_pca_true_by_pseudotime.png` to assess continuous underlying dynamics, then `embedding_pca_true_with_velocity.png` to check whether projected true velocity follows the trajectory. Use true phase portraits and gene dynamics to inspect GRN-regulated kinetics.
-- `observed/`: noisy observed-count diagnostics. Use these to inspect technical noise effects, not to validate the smooth ODE directly.
-- `observed_lownoise/`: observed diagnostics under a mild noise setting (`capture_rate=1.0`, `dropout_rate=0.0`) to separate count sampling effects from the underlying dynamics.
-- `diagnostics/`: notes or future summary files.
+```bash
+python examples/run_mvp_bifurcation.py
+python examples/plot_bifurcation.py
+```
 
-Observed UMAP can fragment sparse toy datasets and should not be overinterpreted. PCA velocity arrows are qualitative diagnostics, not a full scVelo-style velocity embedding.
+Minimal Python usage:
 
-## Bifurcation MVP
+```python
+import pandas as pd
 
-`simulate_bifurcation` implements the current trunk-to-two-branch MVP. NVSim
-integrates the trunk first, copies the terminal trunk `u` and `s` vectors at the
-branch point, then integrates `branch_0` and `branch_1` independently from that
-inherited state. Returned layer matrices are cells x genes; internal segment
-arrays stored in `uns["segment_time_courses"]` are timepoints x genes. Cell order
-is trunk samples first, then `branch_0`, then `branch_1`; `obs` includes global
-`pseudotime`, segment-local `local_time`, and `branch` labels.
+from nvsim.grn import GRN
+from nvsim.simulate import simulate_linear
 
-Branch-specific master regulator programs can be supplied through
-`branch_master_programs`. If they are omitted, both branches share the same
-programs and can remain dynamically identical after inheriting the same state.
-This MVP still does not implement gene classes, promoter switching, SERGIO CLE,
-or VeloSim EVF-to-kinetics.
+edges = pd.DataFrame(
+    {
+        "regulator": ["g0"],
+        "target": ["g1"],
+        "weight": [0.8],
+        "sign": ["activation"],
+        "threshold": [0.5],
+        "hill_coefficient": [2.0],
+    }
+)
 
-Run `python examples/run_mvp_bifurcation.py` to generate a toy bifurcation h5ad
-when AnnData is installed. Run `python examples/plot_bifurcation.py` to create
-quick-look plots under `examples/plots_bifurcation/`. Start with true PCA by
-branch and true PCA with velocity arrows to inspect the underlying bifurcation.
-Use observed and low-noise observed plots only to inspect technical noise effects;
-observed UMAP can fragment sparse toy data and should not be overinterpreted.
-PCA velocity arrows are qualitative diagnostics, not a full scVelo-style velocity
-embedding.
+grn = GRN.from_dataframe(edges, genes=["g0", "g1"])
+result = simulate_linear(grn, n_cells=50, time_end=2.0, dt=0.05, seed=7)
 
-## Plotting Refinements
+print(result["layers"]["true_spliced"].shape)
+print(result["var"][["gene_role", "gene_class"]].head())
+```
 
-True-layer plots remain the primary scientific validation view for NVSim.
-Observed plots are technical-noise diagnostics. The `observed_lownoise` example
-outputs use `capture_rate=1.0`, `dropout_rate=0.0`, and
-`poisson_observed=False`, so they are continuous visualization/debugging views
-rather than realistic UMI count simulations. Bifurcation plotting selects
-representative master, activation-target, and repression-target genes by
-post-branch `true_alpha` divergence when branch labels are available.
+## Model Summary
+
+For gene `i`, NVSim currently uses:
+
+```text
+du_i/dt = alpha_i(t) - beta_i * u_i(t)
+ds_i/dt = beta_i * u_i(t) - gamma_i * s_i(t)
+v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
+```
+
+- `alpha_i(t)` is GRN-controlled.
+- Genes without incoming GRN edges are treated as `gene_role = master_regulator`.
+- Genes with incoming GRN edges are treated as `gene_role = target`.
+- `gene_class` is reserved for future biological class labels and is currently set to `unassigned`.
+- Regulation uses additive Hill-style activation and repression contributions.
+
+## Current v0.1 Scope
+
+Included now:
+
+- Linear simulation.
+- Trunk-to-two-branch bifurcation simulation.
+- True/observed layer separation.
+- Optional AnnData export.
+- Qualitative PCA/UMAP plotting utilities.
+
+Explicitly not included yet:
+
+- Normal/MURK/branching gene classes.
+- Promoter switching.
+- SERGIO CLE or other stochastic simulator paths.
+- VeloSim EVF-to-kinetics mapping.
+- Full scVelo-style velocity embedding.
+- Calibrated large-scale UMI realism.
+
+## Project Docs
+
+- [Current Status](CURRENT_STATUS.md)
+- [Validation Report](VALIDATION_REPORT.md)
+- [Chinese Model Notes](NVSim_model_cn.md)
+- [Examples Guide](examples/README.md)

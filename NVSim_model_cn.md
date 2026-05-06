@@ -146,6 +146,18 @@ branch = linear
 time_index
 ```
 
+输出基因元数据 `var` 中包含：
+
+```text
+gene_role
+gene_class
+```
+
+其中：
+
+- `gene_role` 表示当前 GRN 结构角色：`master_regulator` 或 `target`
+- `gene_class` 预留给未来更细的生物学类别系统，目前统一为 `unassigned`
+
 ### 6.2 Bifurcation
 
 `simulate_bifurcation()` 当前实现 trunk-to-two-branch MVP。流程是：

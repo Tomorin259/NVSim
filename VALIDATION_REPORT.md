@@ -115,6 +115,7 @@ Status: satisfied for v0.1.
   - `adata.obs["pseudotime"]`
   - `adata.obs["branch"]`
   - `adata.obs["local_time"]` when present in result obs
+  - `adata.var["gene_role"]`
   - `adata.var["gene_class"]`
   - `adata.uns["true_grn"]`
   - `adata.uns["kinetic_params"]`
@@ -144,6 +145,16 @@ Relevant tests:
 
 - `tests/test_noise.py`
 - True/observed separation tests in `tests/test_simulate.py`
+
+## Metadata Semantics
+
+Status: clarified for v0.1.
+
+- `gene_role` records current GRN role:
+  - `master_regulator`
+  - `target`
+- `gene_class` is intentionally not used for role labels.
+- `gene_class` is reserved for future biological class systems and is currently `unassigned` for every gene.
 
 ## H. Plotting
 

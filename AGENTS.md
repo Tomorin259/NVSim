@@ -63,6 +63,7 @@ The simulator should eventually produce an AnnData object with:
 - adata.obs["pseudotime"]
 - adata.obs["branch"]
 - adata.obs["cell_type"] if available
+- adata.var["gene_role"] if available
 - adata.var["gene_class"] if available
 - adata.uns["true_grn"]
 - adata.uns["kinetic_params"]
@@ -83,4 +84,5 @@ Therefore, the following ground truth must be accessible and reproducible:
 - true velocity
 - pseudotime
 - branch labels
+- gene roles
 - gene classes

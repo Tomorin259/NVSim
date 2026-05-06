@@ -71,6 +71,7 @@ The default output is a plain Python dictionary with:
 - `obs["pseudotime"]`
 - `obs["local_time"]`
 - `obs["branch"]`
+- `var["gene_role"]`
 - `var["gene_class"]`
 - `uns["true_grn"]`
 - `uns["kinetic_params"]`
@@ -85,6 +86,14 @@ Bifurcation dictionaries additionally include:
 Layer matrices are cells x genes. Internal segment time courses are timepoints x genes.
 
 Optional AnnData export includes the required layers, obs columns, var metadata, and uns fields when `anndata` is installed.
+
+## Gene Metadata
+
+- `gene_role` is current structural GRN role metadata:
+  - `master_regulator`: no incoming edges, driven by external master programs
+  - `target`: has incoming GRN regulation
+- `gene_class` is reserved for future biological class labels.
+- In v0.1, `gene_class` is always `unassigned`.
 
 ## Supported Plots
 

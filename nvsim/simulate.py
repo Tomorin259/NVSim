@@ -253,7 +253,10 @@ def _prepare_common_inputs(
 def _gene_metadata(grn: GRN) -> pd.DataFrame:
     var = pd.DataFrame(index=pd.Index(grn.genes, name="gene"))
     master_set = set(_master_genes(grn))
-    var["gene_class"] = ["master_regulator" if gene in master_set else "target" for gene in grn.genes]
+    var["gene_role"] = ["master_regulator" if gene in master_set else "target" for gene in grn.genes]
+    # Keep the gene_class column present for downstream compatibility, but reserve
+    # it for future biological class labels such as normal/MURK/branching genes.
+    var["gene_class"] = "unassigned"
     return var
 
 

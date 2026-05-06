@@ -47,6 +47,20 @@ def test_output_dimensions_are_correct():
     assert set(["pseudotime", "branch"]).issubset(result["obs"].columns)
 
 
+def test_var_metadata_distinguishes_gene_role_from_gene_class():
+    grn = _small_grn()
+    result = simulate_linear(grn, n_cells=12, time_end=1.0, dt=0.05, seed=13, poisson_observed=False)
+    var = result["var"]
+
+    assert set(["gene_role", "gene_class"]).issubset(var.columns)
+    assert set(var["gene_role"]) == {"master_regulator", "target"}
+    assert set(var["gene_class"]) == {"unassigned"}
+    assert var.loc["g0", "gene_role"] == "master_regulator"
+    assert var.loc["g1", "gene_role"] == "master_regulator"
+    assert var.loc["g2", "gene_role"] == "target"
+    assert var.loc["g3", "gene_role"] == "target"
+
+
 def test_same_seed_reproduces_sampled_cells():
     grn = _small_grn()
     result1 = simulate_linear(grn, n_cells=20, time_end=1.5, dt=0.03, seed=11)
@@ -89,6 +103,7 @@ def test_optional_anndata_export_contains_expected_fields():
         "true_alpha",
     ]).issubset(adata.layers.keys())
     assert set(["pseudotime", "branch"]).issubset(adata.obs.columns)
+    assert set(["gene_role", "gene_class"]).issubset(adata.var.columns)
     assert set(["true_grn", "kinetic_params", "simulation_config"]).issubset(adata.uns.keys())
 
 

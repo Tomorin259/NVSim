@@ -15,9 +15,16 @@ This directory contains reproducible scripts for the v0.1 MVP. Generated files a
 - `run_sergio_grn_multimaster.py`: uses the same read-only Yeast-400 GRN but drives
   branch programs through ten high-out-degree master regulators. If AnnData is
   installed, it writes `outputs/sergio_yeast400_multimaster/sergio_yeast400_multimaster_bifurcation.h5ad`.
+- `run_sergio_1200g_ds3_bifurcation.py`: the current recommended SERGIO-style
+  deterministic path. It reads the original SERGIO dataset files
+  `Interaction_cID_6.txt` and `Regs_cID_6.txt`, calibrates half-response values
+  from SERGIO `simulated_noNoise_*.csv` mean expression, and writes results
+  under `outputs/sergio_1200g_ds3_bifurcation/`.
 - `run_sergio_ecoli1200_25master.py`: reads the read-only SERGIO/GNW Ecoli-1200
   DOT GRN and drives branch programs through 25 high-out-degree master regulators.
   If AnnData is installed, it writes `outputs/sergio_ecoli1200_25master/sergio_ecoli1200_25master_bifurcation.h5ad`.
+  This is a legacy GNW/DOT stress-test path rather than the main SERGIO
+  `targets/regs` workflow.
 
 ## Plotting
 
@@ -50,6 +57,7 @@ python examples/run_sergio_grn_bifurcation.py
 python examples/plot_sergio_grn_bifurcation.py
 python examples/run_sergio_grn_multimaster.py
 python examples/plot_sergio_grn_multimaster.py
+python examples/run_sergio_1200g_ds3_bifurcation.py
 python examples/run_sergio_ecoli1200_25master.py
 python examples/plot_sergio_ecoli1200_25master.py
 ```
@@ -63,10 +71,20 @@ Current generated output groups are:
 - `outputs/bifurcation_20gene_3master/`: small hand-built GRN bifurcation dataset.
 - `outputs/sergio_yeast400_3master/`: larger SERGIO/GNW Yeast-400 GRN dataset currently driven by three branch-program master regulators.
 - `outputs/sergio_yeast400_multimaster/`: the same Yeast-400 GRN driven by ten branch-program master regulators; use this to inspect whether higher-dimensional master dynamics produce richer bifurcation structure.
+- `outputs/sergio_1200g_ds3_bifurcation/`: SERGIO original `targets/regs`
+  1200-gene dataset routed through NVSim's deterministic ODE path, with
+  mean-expression half-response calibration from SERGIO `simulated_noNoise`
+  reference data.
 - `outputs/sergio_ecoli1200_25master/`: larger SERGIO/GNW Ecoli-1200 GRN driven by 25 branch-program master regulators for stress-testing larger GRN-aware velocity simulation.
 
 The SERGIO-derived output uses the read-only reference file:
 `../SERGIO/GNW_sampled_GRNs/Yeast_400_net3.dot`.
+
+The recommended 1200-gene SERGIO deterministic path uses the read-only
+reference files:
+`../SERGIO/data_sets/De-noised_1200G_9T_300cPerT_6_DS3/Interaction_cID_6.txt`
+and
+`../SERGIO/data_sets/De-noised_1200G_9T_300cPerT_6_DS3/Regs_cID_6.txt`.
 
 The Ecoli-1200 output uses the read-only reference file:
 `../SERGIO/GNW_sampled_GRNs/Ecoli_1200_net4.dot`.

@@ -21,6 +21,7 @@ from .grn import GRN
 from .kinetics import create_kinetic_vectors, initialize_state
 from .noise import generate_observed_counts
 from .output import make_result_dict
+from .production import StateProductionProfile
 from .programs import AlphaProgram, coerce_programs, constant
 from .regulation import compute_alpha
 
@@ -40,17 +41,22 @@ def _alpha_from_state(
     master_programs: Mapping[str, AlphaProgram],
     default_master_alpha: float,
     alpha_max: float | None,
+    source_alpha: pd.Series | None = None,
 ) -> np.ndarray:
     # 根据当前 spliced 状态 s(t) 重新计算 alpha(t)。
-    # master 的 alpha 来自时间程序；target/intermediate 的 alpha 来自 GRN。
+    # master 的 alpha 优先来自 source_alpha；否则来自时间程序。
+    # target/intermediate 的 alpha 来自 GRN。
     genes = grn.genes
     normalized_t = 0.0 if time_end == 0 else float(np.clip(t / time_end, 0.0, 1.0))
     # basal 先全设为 0；只有 master gene 会写入外部 alpha program。
     # target gene 的 alpha 不直接指定，而由 compute_alpha 累加 GRN 贡献。
     basal = pd.Series(0.0, index=pd.Index(genes, name="gene"), dtype=float)
-    for gene in _master_genes(grn):
-        program = master_programs.get(gene, constant(default_master_alpha))
-        basal.loc[gene] = program.value(normalized_t)
+    if source_alpha is not None:
+        basal.update(source_alpha.reindex(genes, fill_value=0.0))
+    else:
+        for gene in _master_genes(grn):
+            program = master_programs.get(gene, constant(default_master_alpha))
+            basal.loc[gene] = program.value(normalized_t)
     # MVP 假设 regulator activity = 当前 spliced RNA s_j(t)。
     regulator_values = pd.Series(np.maximum(s, 0.0), index=pd.Index(genes, name="gene"), dtype=float)
     alpha = compute_alpha(regulator_values, grn, basal_alpha=basal, alpha_min=0.0, alpha_max=alpha_max)
@@ -67,12 +73,13 @@ def _derivative(
     master_programs: Mapping[str, AlphaProgram],
     default_master_alpha: float,
     alpha_max: float | None,
+    source_alpha: pd.Series | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     # y 是拼接状态向量：[u_1...u_G, s_1...s_G]。
     n_genes = len(beta)
     u = np.maximum(y[:n_genes], 0.0)
     s = np.maximum(y[n_genes:], 0.0)
-    alpha = _alpha_from_state(s, t, time_end, grn, master_programs, default_master_alpha, alpha_max)
+    alpha = _alpha_from_state(s, t, time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha)
     # RNA velocity 方程：du/dt -> true_velocity_u；ds/dt -> true_velocity。
     du = alpha - beta * u
     ds = beta * u - gamma * s
@@ -90,10 +97,11 @@ def _rk4_step(
     master_programs: Mapping[str, AlphaProgram],
     default_master_alpha: float,
     alpha_max: float | None,
+    source_alpha: pd.Series | None = None,
 ) -> np.ndarray:
     """执行一步 RK4；每个中间状态都会重新通过 GRN 计算 alpha。"""
 
-    k1, _ = _derivative(y, t, time_end, grn, beta, gamma, master_programs, default_master_alpha, alpha_max)
+    k1, _ = _derivative(y, t, time_end, grn, beta, gamma, master_programs, default_master_alpha, alpha_max, source_alpha)
     k2, _ = _derivative(
         y + 0.5 * dt * k1,
         t + 0.5 * dt,
@@ -104,6 +112,7 @@ def _rk4_step(
         master_programs,
         default_master_alpha,
         alpha_max,
+        source_alpha,
     )
     k3, _ = _derivative(
         y + 0.5 * dt * k2,
@@ -115,8 +124,20 @@ def _rk4_step(
         master_programs,
         default_master_alpha,
         alpha_max,
+        source_alpha,
     )
-    k4, _ = _derivative(y + dt * k3, t + dt, time_end, grn, beta, gamma, master_programs, default_master_alpha, alpha_max)
+    k4, _ = _derivative(
+        y + dt * k3,
+        t + dt,
+        time_end,
+        grn,
+        beta,
+        gamma,
+        master_programs,
+        default_master_alpha,
+        alpha_max,
+        source_alpha,
+    )
     y_next = y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     return np.maximum(y_next, 0.0)
 
@@ -146,6 +167,7 @@ def _simulate_segment(
     alpha_max: float | None,
     time_offset: float = 0.0,
     program_time_end: float | None = None,
+    source_alpha: pd.Series | None = None,
 ) -> dict[str, np.ndarray]:
     """Simulate one linear segment and return timepoints x genes arrays.
 
@@ -173,7 +195,9 @@ def _simulate_segment(
 
     u[0] = np.maximum(u0, 0.0)
     s[0] = np.maximum(s0, 0.0)
-    alpha[0] = _alpha_from_state(s[0], global_time[0], alpha_time_end, grn, master_programs, default_master_alpha, alpha_max)
+    alpha[0] = _alpha_from_state(
+        s[0], global_time[0], alpha_time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha
+    )
     # true_velocity 是 spliced velocity ds/dt；true_velocity_u 是 unspliced velocity du/dt。
     velocity[0] = beta * u[0] - gamma * s[0]
     true_velocity_u[0] = alpha[0] - beta * u[0]
@@ -191,10 +215,13 @@ def _simulate_segment(
             master_programs,
             default_master_alpha,
             alpha_max,
+            source_alpha,
         )
         u[step] = y[:n_genes]
         s[step] = y[n_genes:]
-        alpha[step] = _alpha_from_state(s[step], global_time[step], alpha_time_end, grn, master_programs, default_master_alpha, alpha_max)
+        alpha[step] = _alpha_from_state(
+            s[step], global_time[step], alpha_time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha
+        )
         velocity[step] = beta * u[step] - gamma * s[step]
         true_velocity_u[step] = alpha[step] - beta * u[step]
 
@@ -299,6 +326,8 @@ def simulate_linear(
     gamma: object | None = None,
     u0: object | None = None,
     s0: object | None = None,
+    production_profile: StateProductionProfile | None = None,
+    production_state: str | None = None,
     master_programs: Mapping[str, AlphaProgram | float] | None = None,
     default_master_alpha: float = 0.5,
     alpha_max: float | None = None,
@@ -313,7 +342,9 @@ def simulate_linear(
     The ODE is integrated on a dense fixed time grid with RK4. Snapshot cells are
     sampled from that grid, and observed layers are generated separately from the
     true layers. Returned layer matrices are cells x genes; internal time-course
-    arrays are timepoints x genes.
+    arrays are timepoints x genes. If ``production_profile`` is supplied,
+    source/master alpha values are taken from ``production_state`` and take
+    precedence over ``master_programs``.
     """
 
     (
@@ -327,6 +358,12 @@ def simulate_linear(
         s0_arr,
         programs,
     ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
+    source_alpha = None
+    if production_profile is not None:
+        if production_state is None:
+            raise ValueError("production_state must be provided when production_profile is used")
+        production_profile.validate_master_genes(_master_genes(grn))
+        source_alpha = production_profile.source_alpha(production_state, genes=grn.genes)
 
     segment = _simulate_segment(
         grn=grn,
@@ -341,6 +378,7 @@ def simulate_linear(
         alpha_max=alpha_max,
         time_offset=0.0,
         program_time_end=time_end,
+        source_alpha=source_alpha,
     )
 
     # snapshot sampling：先模拟连续时间过程，再抽样为离散细胞。
@@ -382,6 +420,8 @@ def simulate_linear(
         "integrator": "rk4",
         "alpha_max": alpha_max,
         "default_master_alpha": default_master_alpha,
+        "production_profile": production_profile is not None,
+        "production_state": production_state,
         "capture_rate": capture_rate,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,

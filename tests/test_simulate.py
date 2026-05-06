@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from nvsim.grn import GRN
+from nvsim.production import StateProductionProfile
 from nvsim.simulate import simulate_linear
 
 
@@ -80,6 +81,37 @@ def test_observed_layers_are_separate_from_true_layers():
     assert layers["unspliced"] is not layers["true_unspliced"]
     assert layers["spliced"].shape == layers["true_spliced"].shape
     assert not np.shares_memory(layers["spliced"], layers["true_spliced"])
+
+
+def test_linear_simulation_can_use_state_production_profile():
+    grn = _small_grn()
+    production = StateProductionProfile(pd.DataFrame({"g0": [1.25], "g1": [0.75]}, index=["bin_0"]))
+    result = simulate_linear(
+        grn,
+        n_cells=10,
+        time_end=1.0,
+        dt=0.05,
+        production_profile=production,
+        production_state="bin_0",
+        master_programs={"g0": 99.0, "g1": 99.0},
+        seed=17,
+        poisson_observed=False,
+    )
+
+    assert result["uns"]["simulation_config"]["production_profile"] is True
+    assert result["uns"]["simulation_config"]["production_state"] == "bin_0"
+    assert np.allclose(result["layers"]["true_alpha"][:, 0], 1.25)
+    assert np.allclose(result["layers"]["true_alpha"][:, 1], 0.75)
+    assert not np.allclose(result["layers"]["true_alpha"][:, 0], 99.0)
+
+
+def test_linear_simulation_requires_state_for_production_profile():
+    grn = _small_grn()
+    production = StateProductionProfile(pd.DataFrame({"g0": [1.0], "g1": [1.0]}, index=["bin_0"]))
+
+    pytest = __import__("pytest")
+    with pytest.raises(ValueError, match="production_state"):
+        simulate_linear(grn, production_profile=production)
 
 
 def test_optional_anndata_export_contains_expected_fields():

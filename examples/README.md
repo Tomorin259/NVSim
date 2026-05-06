@@ -1,0 +1,72 @@
+# NVSim Examples
+
+This directory contains reproducible scripts for the v0.1 MVP. Generated files are written under `outputs/` and are intentionally ignored by `.gitignore` because they can be regenerated from these scripts.
+
+## Data Generation
+
+- `run_mvp_linear.py`: builds a 20-gene linear GRN-aware RNA velocity dataset.
+  If AnnData is installed, it writes `outputs/linear_20gene/mvp_linear.h5ad`.
+- `run_mvp_bifurcation.py`: builds a trunk-to-two-branch dataset with inherited
+  branch initial states. If AnnData is installed, it writes
+  `outputs/bifurcation_20gene_3master/mvp_bifurcation.h5ad`.
+- `run_sergio_grn_bifurcation.py`: reads the read-only SERGIO/GNW Yeast-400
+  DOT GRN and builds a larger 400-gene NVSim bifurcation dataset. If AnnData is
+  installed, it writes `outputs/sergio_yeast400_3master/sergio_yeast400_bifurcation.h5ad`.
+- `run_sergio_grn_multimaster.py`: uses the same read-only Yeast-400 GRN but drives
+  branch programs through ten high-out-degree master regulators. If AnnData is
+  installed, it writes `outputs/sergio_yeast400_multimaster/sergio_yeast400_multimaster_bifurcation.h5ad`.
+- `run_sergio_ecoli1200_25master.py`: reads the read-only SERGIO/GNW Ecoli-1200
+  DOT GRN and drives branch programs through 25 high-out-degree master regulators.
+  If AnnData is installed, it writes `outputs/sergio_ecoli1200_25master/sergio_ecoli1200_25master_bifurcation.h5ad`.
+
+## Plotting
+
+- `plot_linear.py`: generates quick-look figures under `outputs/linear_20gene/plots/`.
+- `plot_bifurcation.py`: generates quick-look figures under
+  `outputs/bifurcation_20gene_3master/plots/` and writes `diagnostics/selected_genes.txt`.
+- `plot_sergio_grn_bifurcation.py`: generates quick-look figures under
+  `outputs/sergio_yeast400_3master/plots/` for the larger SERGIO-derived GRN.
+- `plot_sergio_grn_multimaster.py`: generates quick-look figures under
+  `outputs/sergio_yeast400_multimaster/plots/` for the ten-master SERGIO-derived GRN.
+- `plot_sergio_ecoli1200_25master.py`: generates quick-look figures under
+  `outputs/sergio_ecoli1200_25master/plots/` for the 25-master Ecoli-1200 GRN.
+
+Plot directories are organized as:
+
+- `true/`: primary scientific validation plots from true layers.
+- `observed/`: noisy observed-layer diagnostics.
+- `observed_lownoise/`: continuous visualization/debugging views with
+  `poisson_observed=False`.
+- `diagnostics/`: text notes and selected-gene diagnostics.
+
+## Recommended Check Commands
+
+```bash
+python examples/run_mvp_linear.py
+python examples/plot_linear.py
+python examples/run_mvp_bifurcation.py
+python examples/plot_bifurcation.py
+python examples/run_sergio_grn_bifurcation.py
+python examples/plot_sergio_grn_bifurcation.py
+python examples/run_sergio_grn_multimaster.py
+python examples/plot_sergio_grn_multimaster.py
+python examples/run_sergio_ecoli1200_25master.py
+python examples/plot_sergio_ecoli1200_25master.py
+```
+
+
+## Output Naming
+
+Current generated output groups are:
+
+- `outputs/linear_20gene/`: small linear MVP sanity dataset.
+- `outputs/bifurcation_20gene_3master/`: small hand-built GRN bifurcation dataset.
+- `outputs/sergio_yeast400_3master/`: larger SERGIO/GNW Yeast-400 GRN dataset currently driven by three branch-program master regulators.
+- `outputs/sergio_yeast400_multimaster/`: the same Yeast-400 GRN driven by ten branch-program master regulators; use this to inspect whether higher-dimensional master dynamics produce richer bifurcation structure.
+- `outputs/sergio_ecoli1200_25master/`: larger SERGIO/GNW Ecoli-1200 GRN driven by 25 branch-program master regulators for stress-testing larger GRN-aware velocity simulation.
+
+The SERGIO-derived output uses the read-only reference file:
+`../SERGIO/GNW_sampled_GRNs/Yeast_400_net3.dot`.
+
+The Ecoli-1200 output uses the read-only reference file:
+`../SERGIO/GNW_sampled_GRNs/Ecoli_1200_net4.dot`.

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nvsim"
+version = "0.1.0"
+description = "Lightweight GRN-aware RNA velocity simulator MVP"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+anndata = ["anndata"]
+umap = ["umap-learn"]
+plotting = ["umap-learn"]
+dev = ["pytest", "anndata", "umap-learn"]
+
+[tool.setuptools.packages.find]
+include = ["nvsim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

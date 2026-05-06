@@ -9,6 +9,7 @@ from .programs import AlphaProgram, constant, linear_decrease, linear_increase, 
 from .simulate import simulate_bifurcation, simulate_linear
 from .noise import generate_observed_counts
 from .output import make_result_dict, to_anndata
+from .sergio_io import SergioInputs, load_sergio_targets_regs
 from .plotting import (
     compute_pca_embedding,
     compute_umap_embedding,
@@ -45,6 +46,8 @@ __all__ = [
     "generate_observed_counts",
     "make_result_dict",
     "to_anndata",
+    "SergioInputs",
+    "load_sergio_targets_regs",
     "compute_pca_embedding",
     "compute_umap_embedding",
     "plot_embedding_by_pseudotime",

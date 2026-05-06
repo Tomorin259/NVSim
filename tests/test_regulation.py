@@ -36,3 +36,12 @@ def test_repression_uses_positive_weight_without_negative_sign():
     assert alpha_low_regulator["g2"] == 2.0
     assert alpha_high_regulator["g2"] == 0.5
     assert alpha_high_regulator["g2"] >= 0.0
+
+
+def test_zero_half_response_matches_sergio_style_edge_cases():
+    x = np.array([0.0, 2.0])
+    act = hill_activation(x, half_response=0.0, hill_coefficient=2.0)
+    rep = hill_repression(x, half_response=0.0, hill_coefficient=2.0)
+
+    assert np.allclose(act, [0.0, 1.0])
+    assert np.allclose(rep, [1.0, 0.0])

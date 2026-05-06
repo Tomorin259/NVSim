@@ -31,12 +31,12 @@ def hill_activation(x: object, half_response: float = 1.0, hill_coefficient: flo
     hill_coefficient n 控制曲线陡峭程度。返回值在 [0, 1]。
     """
 
-    if half_response <= 0 or hill_coefficient <= 0:
-        raise ValueError("half_response and hill_coefficient must be positive")
+    if half_response < 0 or hill_coefficient <= 0:
+        raise ValueError("half_response must be non-negative and hill_coefficient must be positive")
     x_arr = _as_nonnegative_array(x, "x")
     numerator = np.power(x_arr, hill_coefficient)
     denominator = np.power(half_response, hill_coefficient) + numerator
-    return numerator / denominator
+    return np.divide(numerator, denominator, out=np.zeros_like(numerator, dtype=float), where=denominator > 0)
 
 
 def hill_repression(x: object, half_response: float = 1.0, hill_coefficient: float = 2.0) -> np.ndarray:

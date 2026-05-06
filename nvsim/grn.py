@@ -52,6 +52,29 @@ def normalize_sign(value: object) -> str:
     return _SIGN_ALIASES[key]
 
 
+def _coerce_mean_expression(
+    regulator_expression: pd.Series | pd.DataFrame | dict[str, float],
+) -> pd.Series:
+    if isinstance(regulator_expression, pd.Series):
+        means = regulator_expression.astype(float).copy()
+    elif isinstance(regulator_expression, pd.DataFrame):
+        if regulator_expression.empty:
+            raise ValueError("regulator_expression dataframe must not be empty")
+        if regulator_expression.columns.size > 0:
+            means = regulator_expression.astype(float).mean(axis=0)
+        else:
+            raise ValueError("regulator_expression dataframe must contain gene columns")
+    else:
+        means = pd.Series(regulator_expression, dtype=float)
+    means.index = means.index.astype(str)
+    values = means.to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("regulator mean expression must be finite")
+    if (values < 0).any():
+        raise ValueError("regulator mean expression must be non-negative")
+    return means
+
+
 def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.DataFrame:
     """校验并标准化 GRN 边表。
 
@@ -99,10 +122,45 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
         values = normalized[col].to_numpy(dtype=float)
         if not np.isfinite(values).all():
             raise ValueError(f"GRN column {col!r} must be finite")
-        if (values <= 0).any():
-            raise ValueError(f"GRN column {col!r} must be positive")
+        if col == "hill_coefficient":
+            if (values <= 0).any():
+                raise ValueError(f"GRN column {col!r} must be positive")
+        else:
+            if (values < 0).any():
+                raise ValueError(f"GRN column {col!r} must be non-negative")
 
     return normalized[list(RETURN_COLUMNS)]
+
+
+def calibrate_half_response(
+    grn: GRN | pd.DataFrame,
+    regulator_expression: pd.Series | pd.DataFrame | dict[str, float],
+) -> GRN | pd.DataFrame:
+    """Set half-response values from regulator mean expression.
+
+    This mirrors the key SERGIO idea that each edge's half-response is derived
+    from the corresponding regulator's mean expression. If a DataFrame is
+    provided, means are computed across rows so columns should be gene ids.
+    ``threshold`` is kept synchronized as a backward-compatible alias.
+    """
+
+    means = _coerce_mean_expression(regulator_expression)
+    if isinstance(grn, GRN):
+        edges = grn.to_dataframe()
+    else:
+        edges = validate_grn(grn)
+
+    missing = sorted(set(edges["regulator"]) - set(means.index))
+    if missing:
+        raise ValueError(f"missing mean expression for regulators: {missing}")
+
+    calibrated = edges.copy()
+    calibrated["half_response"] = calibrated["regulator"].map(means).astype(float)
+    calibrated["threshold"] = calibrated["half_response"]
+
+    if isinstance(grn, GRN):
+        return GRN.from_dataframe(calibrated, genes=grn.genes)
+    return calibrated
 
 
 @dataclass(frozen=True)

@@ -12,8 +12,9 @@ It is intentionally smaller than SERGIO, VeloSim, dyngen, or scVelo-style pipeli
 
 ## Overview
 
-- Explicit GRN input with regulator, target, sign, weight, threshold, and Hill coefficient.
-- Master-regulator programs for genes without incoming edges.
+- Explicit GRN input with regulator, target, sign, `K`, `half_response`, and `hill_coefficient`.
+- Explicit or inferred master regulators with state/bin-wise production profiles.
+- SERGIO-style additive Hill-function production rates for non-master genes.
 - Deterministic ODE dynamics for unspliced and spliced RNA.
 - Separate true and observed layers.
 - Linear and trunk-to-two-branch bifurcation examples.
@@ -57,21 +58,34 @@ Minimal Python usage:
 import pandas as pd
 
 from nvsim.grn import GRN
+from nvsim.production import StateProductionProfile
 from nvsim.simulate import simulate_linear
 
 edges = pd.DataFrame(
     {
         "regulator": ["g0"],
         "target": ["g1"],
-        "weight": [0.8],
+        "K": [0.8],
         "sign": ["activation"],
-        "threshold": [0.5],
+        "half_response": [0.5],
         "hill_coefficient": [2.0],
     }
 )
 
 grn = GRN.from_dataframe(edges, genes=["g0", "g1"])
-result = simulate_linear(grn, n_cells=50, time_end=2.0, dt=0.05, seed=7)
+production = StateProductionProfile(
+    pd.DataFrame({"g0": [1.0]}, index=["state_0"])
+)
+result = simulate_linear(
+    grn,
+    n_cells=50,
+    time_end=2.0,
+    dt=0.05,
+    seed=7,
+    master_regulators=["g0"],
+    production_profile=production,
+    production_state="state_0",
+)
 
 print(result["layers"]["true_spliced"].shape)
 print(result["var"][["gene_role", "gene_class"]].head())
@@ -88,10 +102,16 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 ```
 
 - `alpha_i(t)` is GRN-controlled.
-- Genes without incoming GRN edges are treated as `gene_role = master_regulator`.
-- Genes with incoming GRN edges are treated as `gene_role = target`.
+- The core GRN layer follows a SERGIO-style parameterized production-rate model:
+  - master regulators are explicit source genes;
+  - master regulators use state/bin-wise production rates;
+  - non-master genes receive additive Hill-function regulatory contributions.
+- Canonical GRN parameters are `K`, `half_response`, and `hill_coefficient`.
+- `gene_role` is `master_regulator` or `non_master`.
 - `gene_class` is reserved for future biological class labels and is currently set to `unassigned`.
 - Regulation uses additive Hill-style activation and repression contributions.
+- State/bin-wise production is the default SERGIO-like forcing behavior.
+- Continuous interpolation between production states is optional and remains an NVSim extension.
 
 ## Current v0.1 Scope
 
@@ -108,6 +128,8 @@ Explicitly not included yet:
 - Normal/MURK/branching gene classes.
 - Promoter switching.
 - SERGIO CLE or other stochastic simulator paths.
+- Half-response auto-calibration as a default workflow. Users should currently provide
+  `half_response` explicitly; a DAG-only SERGIO-like calibration pass may be added later.
 - VeloSim EVF-to-kinetics mapping.
 - Full scVelo-style velocity embedding.
 - Calibrated large-scale UMI realism.

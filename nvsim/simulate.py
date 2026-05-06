@@ -26,11 +26,30 @@ from .programs import AlphaProgram, coerce_programs, constant
 from .regulation import compute_alpha
 
 
-def _master_genes(grn: GRN) -> tuple[str, ...]:
-    """返回没有 incoming edges 的基因，即需要外部 alpha program 的 master。"""
+def _infer_master_genes(grn: GRN) -> tuple[str, ...]:
+    """Fallback master-regulator inference from network topology."""
 
     incoming = set(grn.edges["target"])
     return tuple(gene for gene in grn.genes if gene not in incoming)
+
+
+def _resolve_master_genes(
+    grn: GRN,
+    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
+    production_profile: StateProductionProfile | None = None,
+) -> tuple[str, ...]:
+    if master_regulators is not None:
+        masters = tuple(str(gene) for gene in master_regulators)
+    elif grn.master_regulators is not None:
+        masters = tuple(str(gene) for gene in grn.master_regulators)
+    elif production_profile is not None:
+        masters = tuple(str(gene) for gene in production_profile.genes)
+    else:
+        masters = _infer_master_genes(grn)
+    missing = sorted(set(masters) - set(grn.genes))
+    if missing:
+        raise ValueError(f"master regulators absent from gene list: {missing}")
+    return masters
 
 
 def _alpha_from_state(
@@ -38,31 +57,45 @@ def _alpha_from_state(
     t: float,
     time_end: float,
     grn: GRN,
+    master_genes: tuple[str, ...],
     master_programs: Mapping[str, AlphaProgram],
     default_master_alpha: float,
     alpha_max: float | None,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
-) -> np.ndarray:
+    return_edge_contributions: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     # 根据当前 spliced 状态 s(t) 重新计算 alpha(t)。
     # master 的 alpha 优先来自 source_alpha；否则来自时间程序。
     # target/intermediate 的 alpha 来自 GRN。
     genes = grn.genes
     normalized_t = 0.0 if time_end == 0 else float(np.clip(t / time_end, 0.0, 1.0))
-    # basal 先全设为 0；只有 master gene 会写入外部 alpha program。
-    # target gene 的 alpha 不直接指定，而由 compute_alpha 累加 GRN 贡献。
-    basal = pd.Series(0.0, index=pd.Index(genes, name="gene"), dtype=float)
+    source = pd.Series(0.0, index=pd.Index(genes, name="gene"), dtype=float)
     if source_alpha_fn is not None:
-        basal.update(source_alpha_fn(t).reindex(genes, fill_value=0.0))
+        source.update(source_alpha_fn(t).reindex(genes, fill_value=0.0))
     elif source_alpha is not None:
-        basal.update(source_alpha.reindex(genes, fill_value=0.0))
+        source.update(source_alpha.reindex(genes, fill_value=0.0))
     else:
-        for gene in _master_genes(grn):
+        for gene in master_genes:
             program = master_programs.get(gene, constant(default_master_alpha))
-            basal.loc[gene] = program.value(normalized_t)
+            source.loc[gene] = program.value(normalized_t)
     # MVP 假设 regulator activity = 当前 spliced RNA s_j(t)。
     regulator_values = pd.Series(np.maximum(s, 0.0), index=pd.Index(genes, name="gene"), dtype=float)
-    alpha = compute_alpha(regulator_values, grn, basal_alpha=basal, alpha_min=0.0, alpha_max=alpha_max)
+    computed = compute_alpha(
+        regulator_values,
+        grn,
+        source_alpha=source,
+        target_leak_alpha=target_leak_alpha,
+        master_regulators=master_genes,
+        alpha_min=0.0,
+        alpha_max=alpha_max,
+        return_edge_contributions=return_edge_contributions,
+    )
+    if return_edge_contributions:
+        alpha, edge_contributions = computed
+        return alpha.reindex(genes).to_numpy(dtype=float), edge_contributions.to_numpy(dtype=float)
+    alpha = computed
     return alpha.reindex(genes).to_numpy(dtype=float)
 
 
@@ -71,11 +104,13 @@ def _derivative(
     t: float,
     time_end: float,
     grn: GRN,
+    master_genes: tuple[str, ...],
     beta: np.ndarray,
     gamma: np.ndarray,
     master_programs: Mapping[str, AlphaProgram],
     default_master_alpha: float,
     alpha_max: float | None,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -84,7 +119,17 @@ def _derivative(
     u = np.maximum(y[:n_genes], 0.0)
     s = np.maximum(y[n_genes:], 0.0)
     alpha = _alpha_from_state(
-        s, t, time_end, grn, master_programs, default_master_alpha, alpha_max, source_alpha, source_alpha_fn
+        s,
+        t,
+        time_end,
+        grn,
+        master_genes,
+        master_programs,
+        default_master_alpha,
+        alpha_max,
+        target_leak_alpha,
+        source_alpha,
+        source_alpha_fn,
     )
     # RNA velocity 方程：du/dt -> true_velocity_u；ds/dt -> true_velocity。
     du = alpha - beta * u
@@ -98,29 +143,45 @@ def _rk4_step(
     dt: float,
     time_end: float,
     grn: GRN,
+    master_genes: tuple[str, ...],
     beta: np.ndarray,
     gamma: np.ndarray,
     master_programs: Mapping[str, AlphaProgram],
     default_master_alpha: float,
     alpha_max: float | None,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
 ) -> np.ndarray:
     """执行一步 RK4；每个中间状态都会重新通过 GRN 计算 alpha。"""
 
     k1, _ = _derivative(
-        y, t, time_end, grn, beta, gamma, master_programs, default_master_alpha, alpha_max, source_alpha, source_alpha_fn
+        y,
+        t,
+        time_end,
+        grn,
+        master_genes,
+        beta,
+        gamma,
+        master_programs,
+        default_master_alpha,
+        alpha_max,
+        target_leak_alpha,
+        source_alpha,
+        source_alpha_fn,
     )
     k2, _ = _derivative(
         y + 0.5 * dt * k1,
         t + 0.5 * dt,
         time_end,
         grn,
+        master_genes,
         beta,
         gamma,
         master_programs,
         default_master_alpha,
         alpha_max,
+        target_leak_alpha,
         source_alpha,
         source_alpha_fn,
     )
@@ -129,11 +190,13 @@ def _rk4_step(
         t + 0.5 * dt,
         time_end,
         grn,
+        master_genes,
         beta,
         gamma,
         master_programs,
         default_master_alpha,
         alpha_max,
+        target_leak_alpha,
         source_alpha,
         source_alpha_fn,
     )
@@ -142,11 +205,13 @@ def _rk4_step(
         t + dt,
         time_end,
         grn,
+        master_genes,
         beta,
         gamma,
         master_programs,
         default_master_alpha,
         alpha_max,
+        target_leak_alpha,
         source_alpha,
         source_alpha_fn,
     )
@@ -168,6 +233,7 @@ def _time_grid(time_end: float, dt: float) -> tuple[np.ndarray, float]:
 def _simulate_segment(
     *,
     grn: GRN,
+    master_genes: tuple[str, ...],
     beta: np.ndarray,
     gamma: np.ndarray,
     u0: np.ndarray,
@@ -177,10 +243,12 @@ def _simulate_segment(
     master_programs: Mapping[str, AlphaProgram],
     default_master_alpha: float,
     alpha_max: float | None,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     time_offset: float = 0.0,
     program_time_end: float | None = None,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
+    return_edge_contributions: bool = False,
 ) -> dict[str, np.ndarray]:
     """Simulate one linear segment and return timepoints x genes arrays.
 
@@ -205,20 +273,30 @@ def _simulate_segment(
     alpha = np.zeros((len(local_time), n_genes), dtype=float)
     velocity = np.zeros((len(local_time), n_genes), dtype=float)
     true_velocity_u = np.zeros((len(local_time), n_genes), dtype=float)
+    edge_contributions = (
+        np.zeros((len(local_time), grn.edges.shape[0]), dtype=float) if return_edge_contributions else None
+    )
 
     u[0] = np.maximum(u0, 0.0)
     s[0] = np.maximum(s0, 0.0)
-    alpha[0] = _alpha_from_state(
+    alpha0 = _alpha_from_state(
         s[0],
         global_time[0],
         alpha_time_end,
         grn,
+        master_genes,
         master_programs,
         default_master_alpha,
         alpha_max,
+        target_leak_alpha,
         source_alpha,
         source_alpha_fn,
+        return_edge_contributions=return_edge_contributions,
     )
+    if return_edge_contributions:
+        alpha[0], edge_contributions[0] = alpha0
+    else:
+        alpha[0] = alpha0
     # true_velocity 是 spliced velocity ds/dt；true_velocity_u 是 unspliced velocity du/dt。
     velocity[0] = beta * u[0] - gamma * s[0]
     true_velocity_u[0] = alpha[0] - beta * u[0]
@@ -231,31 +309,40 @@ def _simulate_segment(
             actual_dt,
             alpha_time_end,
             grn,
+            master_genes,
             beta,
             gamma,
             master_programs,
             default_master_alpha,
             alpha_max,
+            target_leak_alpha,
             source_alpha,
             source_alpha_fn,
         )
         u[step] = y[:n_genes]
         s[step] = y[n_genes:]
-        alpha[step] = _alpha_from_state(
+        alpha_step = _alpha_from_state(
             s[step],
             global_time[step],
             alpha_time_end,
             grn,
+            master_genes,
             master_programs,
             default_master_alpha,
             alpha_max,
+            target_leak_alpha,
             source_alpha,
             source_alpha_fn,
+            return_edge_contributions=return_edge_contributions,
         )
+        if return_edge_contributions:
+            alpha[step], edge_contributions[step] = alpha_step
+        else:
+            alpha[step] = alpha_step
         velocity[step] = beta * u[step] - gamma * s[step]
         true_velocity_u[step] = alpha[step] - beta * u[step]
 
-    return {
+    segment = {
         "local_time": local_time,
         "pseudotime": global_time,
         "actual_dt": np.asarray(actual_dt),
@@ -265,6 +352,9 @@ def _simulate_segment(
         "velocity": velocity,
         "true_velocity_u": true_velocity_u,
     }
+    if edge_contributions is not None:
+        segment["edge_contributions"] = edge_contributions
+    return segment
 
 
 def _sample_snapshots(
@@ -307,10 +397,10 @@ def _prepare_common_inputs(
     )
 
 
-def _gene_metadata(grn: GRN) -> pd.DataFrame:
+def _gene_metadata(grn: GRN, master_genes: tuple[str, ...]) -> pd.DataFrame:
     var = pd.DataFrame(index=pd.Index(grn.genes, name="gene"))
-    master_set = set(_master_genes(grn))
-    var["gene_role"] = ["master_regulator" if gene in master_set else "target" for gene in grn.genes]
+    master_set = set(master_genes)
+    var["gene_role"] = ["master_regulator" if gene in master_set else "non_master" for gene in grn.genes]
     # Keep the gene_class column present for downstream compatibility, but reserve
     # it for future biological class labels such as normal/MURK/branching genes.
     var["gene_class"] = "unassigned"
@@ -374,16 +464,19 @@ def simulate_linear(
     gamma: object | None = None,
     u0: object | None = None,
     s0: object | None = None,
+    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
     production_profile: StateProductionProfile | None = None,
     production_state: str | None = None,
     master_programs: Mapping[str, AlphaProgram | float] | None = None,
     default_master_alpha: float = 0.5,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     alpha_max: float | None = None,
     seed: int = 0,
     noise_seed: int | None = None,
     capture_rate: float | None = None,
     poisson_observed: bool = True,
     dropout_rate: float = 0.0,
+    return_edge_contributions: bool = False,
 ) -> dict:
     """Simulate a linear GRN-aware RNA velocity trajectory.
 
@@ -406,15 +499,18 @@ def simulate_linear(
         s0_arr,
         programs,
     ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
+    master_genes = _resolve_master_genes(grn, master_regulators=master_regulators, production_profile=production_profile)
     source_alpha = None
     if production_profile is not None:
         if production_state is None:
             raise ValueError("production_state must be provided when production_profile is used")
-        production_profile.validate_master_genes(_master_genes(grn))
+        production_profile.validate_master_genes(master_genes)
+        production_profile.validate_states([production_state])
         source_alpha = production_profile.source_alpha(production_state, genes=grn.genes)
 
     segment = _simulate_segment(
         grn=grn,
+        master_genes=master_genes,
         beta=beta_arr,
         gamma=gamma_arr,
         u0=u0_arr,
@@ -423,10 +519,12 @@ def simulate_linear(
         dt=dt,
         master_programs=programs,
         default_master_alpha=default_master_alpha,
+        target_leak_alpha=target_leak_alpha,
         alpha_max=alpha_max,
         time_offset=0.0,
         program_time_end=time_end,
         source_alpha=source_alpha,
+        return_edge_contributions=return_edge_contributions,
     )
 
     # snapshot sampling：先模拟连续时间过程，再抽样为离散细胞。
@@ -468,12 +566,18 @@ def simulate_linear(
         "integrator": "rk4",
         "alpha_max": alpha_max,
         "default_master_alpha": default_master_alpha,
+        "explicit_master_regulators": list(master_genes),
         "production_profile": production_profile is not None,
         "production_state": production_state,
+        "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
+        "return_edge_contributions": return_edge_contributions,
     }
+
+    edge_contributions = segment.get("edge_contributions")
+    sampled_edge_contributions = None if edge_contributions is None else edge_contributions[sampled_idx]
 
     return make_result_dict(
         true_unspliced=true_u,
@@ -484,12 +588,14 @@ def simulate_linear(
         observed_unspliced=observed["unspliced"],
         observed_spliced=observed["spliced"],
         obs=obs,
-        var=_gene_metadata(grn),
+        var=_gene_metadata(grn, master_genes),
         grn=grn,
         beta=beta_series,
         gamma=gamma_series,
         simulation_config=config,
         time_grid=time_grid,
+        edge_contributions=sampled_edge_contributions,
+        edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
     )
 
 
@@ -504,18 +610,22 @@ def simulate_bifurcation(
     gamma: object | None = None,
     u0: object | None = None,
     s0: object | None = None,
+    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
     production_profile: StateProductionProfile | None = None,
     trunk_production_state: str | None = None,
     branch_production_states: Mapping[str, str] | None = None,
+    interpolate_production: bool = False,
     master_programs: Mapping[str, AlphaProgram | float] | None = None,
     branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
     default_master_alpha: float = 0.5,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     alpha_max: float | None = None,
     seed: int = 0,
     noise_seed: int | None = None,
     capture_rate: float | None = None,
     poisson_observed: bool = True,
     dropout_rate: float = 0.0,
+    return_edge_contributions: bool = False,
 ) -> dict:
     """Simulate a trunk-to-two-branch RNA velocity trajectory.
 
@@ -541,7 +651,9 @@ def simulate_bifurcation(
         s0_arr,
         programs,
     ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
+    master_genes = _resolve_master_genes(grn, master_regulators=master_regulators, production_profile=production_profile)
     trunk_source_alpha = None
+    branch_source_alpha: dict[str, pd.Series] = {}
     branch_source_alpha_fns: dict[str, Callable[[float], pd.Series]] = {}
     if production_profile is not None:
         if trunk_production_state is None:
@@ -551,21 +663,26 @@ def simulate_bifurcation(
         missing_branches = [branch for branch in branch_labels if branch not in branch_production_states]
         if missing_branches:
             raise ValueError(f"branch_production_states missing branches: {missing_branches}")
-        production_profile.validate_master_genes(_master_genes(grn))
+        production_profile.validate_master_genes(master_genes)
+        production_profile.validate_states([trunk_production_state, *(branch_production_states[branch] for branch in branch_labels)])
         trunk_source_alpha = production_profile.source_alpha(trunk_production_state, genes=grn.genes)
         for branch in branch_labels:
-            branch_source_alpha_fns[branch] = _branch_source_alpha_fn(
-                production_profile,
-                trunk_production_state,
-                branch_production_states[branch],
-                trunk_time,
-                branch_time,
-                grn.genes,
-            )
+            if interpolate_production:
+                branch_source_alpha_fns[branch] = _branch_source_alpha_fn(
+                    production_profile,
+                    trunk_production_state,
+                    branch_production_states[branch],
+                    trunk_time,
+                    branch_time,
+                    grn.genes,
+                )
+            else:
+                branch_source_alpha[branch] = production_profile.source_alpha(branch_production_states[branch], genes=grn.genes)
 
     total_program_time = trunk_time + branch_time
     trunk = _simulate_segment(
         grn=grn,
+        master_genes=master_genes,
         beta=beta_arr,
         gamma=gamma_arr,
         u0=u0_arr,
@@ -574,10 +691,12 @@ def simulate_bifurcation(
         dt=dt,
         master_programs=programs,
         default_master_alpha=default_master_alpha,
+        target_leak_alpha=target_leak_alpha,
         alpha_max=alpha_max,
         time_offset=0.0,
         program_time_end=total_program_time,
         source_alpha=trunk_source_alpha,
+        return_edge_contributions=return_edge_contributions,
     )
     # bifurcation 的关键：两个 branch 必须继承同一个 trunk terminal state。
     inherited_u = trunk["u"][-1].copy()
@@ -587,6 +706,7 @@ def simulate_bifurcation(
     for branch in branch_labels:
         branch_segments[branch] = _simulate_segment(
             grn=grn,
+            master_genes=master_genes,
             beta=beta_arr,
             gamma=gamma_arr,
             u0=inherited_u.copy(),
@@ -595,10 +715,13 @@ def simulate_bifurcation(
             dt=dt,
             master_programs=_merge_programs(programs, None if branch_master_programs is None else branch_master_programs.get(branch)),
             default_master_alpha=default_master_alpha,
+            target_leak_alpha=target_leak_alpha,
             alpha_max=alpha_max,
             time_offset=trunk_time,
             program_time_end=total_program_time,
+            source_alpha=branch_source_alpha.get(branch),
             source_alpha_fn=branch_source_alpha_fns.get(branch),
+            return_edge_contributions=return_edge_contributions,
         )
 
     rng = np.random.default_rng(seed)
@@ -678,14 +801,25 @@ def simulate_bifurcation(
         "integrator": "rk4",
         "alpha_max": alpha_max,
         "default_master_alpha": default_master_alpha,
+        "explicit_master_regulators": list(master_genes),
         "production_profile": production_profile is not None,
         "trunk_production_state": trunk_production_state,
         "branch_production_states": dict(branch_production_states) if branch_production_states is not None else None,
+        "interpolate_production": interpolate_production,
         "branch_master_programs_enabled": branch_master_programs is not None,
+        "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
+        "return_edge_contributions": return_edge_contributions,
     }
+
+    sampled_edge_contributions = None
+    if return_edge_contributions:
+        sampled_edge_contributions = np.concatenate(
+            [segment["edge_contributions"][idx] for _, segment, idx in sampled_segments],
+            axis=0,
+        )
 
     result = make_result_dict(
         true_unspliced=true_u,
@@ -696,12 +830,14 @@ def simulate_bifurcation(
         observed_unspliced=observed["unspliced"],
         observed_spliced=observed["spliced"],
         obs=obs,
-        var=_gene_metadata(grn),
+        var=_gene_metadata(grn, master_genes),
         grn=grn,
         beta=beta_series,
         gamma=gamma_series,
         simulation_config=config,
         time_grid=time_grid,
+        edge_contributions=sampled_edge_contributions,
+        edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
     )
     result["uns"]["segment_time_courses"] = {
         "trunk": trunk,

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from nvsim.grn import GRN
 from nvsim.regulation import compute_alpha, hill_activation, hill_repression
@@ -22,7 +23,7 @@ def test_repression_uses_positive_weight_without_negative_sign():
         {
             "regulator": ["g1"],
             "target": ["g2"],
-            "weight": [2.0],
+            "K": [2.0],
             "sign": ["repression"],
             "half_response": [1.0],
             "hill_coefficient": [1.0],
@@ -38,10 +39,80 @@ def test_repression_uses_positive_weight_without_negative_sign():
     assert alpha_high_regulator["g2"] >= 0.0
 
 
-def test_zero_half_response_matches_sergio_style_edge_cases():
-    x = np.array([0.0, 2.0])
-    act = hill_activation(x, half_response=0.0, hill_coefficient=2.0)
-    rep = hill_repression(x, half_response=0.0, hill_coefficient=2.0)
+def test_half_response_must_be_positive():
+    with pytest.raises(ValueError, match="positive"):
+        hill_activation([0.0, 2.0], half_response=0.0, hill_coefficient=2.0)
 
-    assert np.allclose(act, [0.0, 1.0])
-    assert np.allclose(rep, [1.0, 0.0])
+
+def test_activation_edge_contribution_matches_sergio_style_formula():
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g1"],
+            "target": ["g2"],
+            "K": [2.0],
+            "sign": ["activation"],
+            "half_response": [1.0],
+            "hill_coefficient": [2.0],
+        }
+    )
+    grn = GRN.from_dataframe(edges, genes=["g1", "g2"])
+    alpha, edge_contributions = compute_alpha(
+        {"g1": 1.0},
+        grn,
+        master_regulators=[],
+        source_alpha=0.0,
+        return_edge_contributions=True,
+    )
+
+    expected = 2.0 * (1.0**2 / (1.0**2 + 1.0**2))
+    assert np.isclose(edge_contributions.iloc[0], expected)
+    assert np.isclose(alpha["g2"], expected)
+
+
+def test_repression_edge_contribution_matches_sergio_style_formula():
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g1"],
+            "target": ["g2"],
+            "K": [2.0],
+            "sign": ["repression"],
+            "half_response": [1.0],
+            "hill_coefficient": [2.0],
+        }
+    )
+    grn = GRN.from_dataframe(edges, genes=["g1", "g2"])
+    alpha, edge_contributions = compute_alpha(
+        {"g1": 1.0},
+        grn,
+        master_regulators=[],
+        source_alpha=0.0,
+        return_edge_contributions=True,
+    )
+
+    expected = 2.0 * (1.0**2 / (1.0**2 + 1.0**2))
+    assert np.isclose(edge_contributions.iloc[0], expected)
+    assert np.isclose(alpha["g2"], expected)
+
+
+def test_explicit_master_regulator_ignores_incoming_grn_contributions():
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g1"],
+            "target": ["g0"],
+            "K": [3.0],
+            "sign": ["activation"],
+            "half_response": [1.0],
+            "hill_coefficient": [1.0],
+        }
+    )
+    grn = GRN.from_dataframe(edges, genes=["g0", "g1"])
+    alpha, edge_contributions = compute_alpha(
+        {"g1": 10.0},
+        grn,
+        master_regulators=["g0"],
+        source_alpha={"g0": 0.75},
+        return_edge_contributions=True,
+    )
+
+    assert np.isclose(alpha["g0"], 0.75)
+    assert np.isclose(edge_contributions.iloc[0], 3.0 * (10.0 / 11.0))

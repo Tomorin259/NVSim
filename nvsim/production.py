@@ -1,4 +1,11 @@
-"""State-based production profiles for source/master regulator genes."""
+"""State-based production profiles for source/master regulator genes.
+
+Rows are discrete states/bins/conditions. Columns are master regulators.
+Values are non-negative master-regulator production rates.
+
+Piecewise constant state/bin-wise forcing is the default SERGIO-like behavior.
+Interpolation utilities are kept as an optional NVSim extension.
+"""
 
 from __future__ import annotations
 
@@ -66,7 +73,11 @@ class StateProductionProfile:
         fraction: float,
         genes: list[str] | tuple[str, ...] | pd.Index | None = None,
     ) -> pd.Series:
-        """Linearly interpolate source alpha between two states."""
+        """Linearly interpolate source alpha between two states.
+
+        This is an NVSim extension and is not the default SERGIO-like forcing
+        behavior.
+        """
 
         if fraction < 0 or fraction > 1:
             raise ValueError("fraction must be in [0, 1]")
@@ -92,3 +103,8 @@ class StateProductionProfile:
             if extra:
                 details.append(f"extra={extra}")
             raise ValueError("production profile genes do not match master genes: " + ", ".join(details))
+
+    def validate_states(self, states: list[str] | tuple[str, ...] | pd.Index) -> None:
+        missing = [str(state) for state in states if str(state) not in self.rates.index]
+        if missing:
+            raise ValueError(f"unknown production state(s): {missing}")

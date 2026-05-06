@@ -12,9 +12,10 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 
 ## Implemented Modules
 
-- `nvsim/grn.py`: validated GRN edge schema, sign normalization, non-negative edge weights, default Hill parameters.
-- `nvsim/regulation.py`: Hill activation/repression functions and GRN-controlled alpha computation.
+- `nvsim/grn.py`: validated GRN edge schema with canonical `K`, `half_response`, and `hill_coefficient`, plus backward-compatible aliases.
+- `nvsim/regulation.py`: SERGIO-style additive Hill activation/repression contributions and optional edge-level contribution output.
 - `nvsim/programs.py`: master regulator alpha programs: constant, linear increase/decrease, sigmoid increase/decrease.
+- `nvsim/production.py`: state/bin-wise master regulator production profiles.
 - `nvsim/kinetics.py`: beta/gamma vector creation or validation and non-negative initial `u0/s0` setup.
 - `nvsim/trajectory.py`: simple metadata builders for linear and bifurcation trajectories.
 - `nvsim/simulate.py`: RK4 ODE integration, linear simulation, bifurcation simulation, snapshot sampling, true and observed layer assembly.
@@ -34,10 +35,12 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 ```
 
 - `beta_i` and `gamma_i` are gene-specific vectors.
-- Master regulator alpha programs are applied only to genes without incoming GRN edges.
-- Target-gene `alpha_i(t)` is recomputed from current regulator spliced expression `s_j(t)`, edge weight, edge sign, Hill coefficient, and threshold.
-- Activation contribution is `weight * H_act(s_j)`.
-- Repression contribution is `weight * H_rep(s_j)`, with no negative sign.
+- Master regulators can be passed explicitly. If not, NVSim falls back to SERGIO-style master metadata when available, then to no-incoming-edge inference.
+- Master regulators inject state/bin information through externally specified production rates.
+- Non-master gene `alpha_i(t)` is recomputed from current regulator spliced expression `s_j(t)`, `K`, edge sign, `half_response`, and `hill_coefficient`.
+- Activation contribution is `K * H_act(s_j)`.
+- Repression contribution is `K * H_rep(s_j)`, with no negative sign.
+- `target_leak_alpha` defaults to `0.0`.
 - `u` and `s` are kept non-negative after integration steps.
 
 ## Supported Simulations
@@ -56,7 +59,7 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 4. Sample and concatenate cells in this order: trunk, `branch_0`, `branch_1`.
 5. Keep `pseudotime`, `local_time`, `branch`, `alpha`, `u`, `s`, and velocity aligned.
 
-Branch-specific master regulator programs can be supplied through `branch_master_programs`. If omitted, both branches share the same programs and may remain identical after inheriting the same state.
+Branch-specific master regulator programs can be supplied through `branch_master_programs`. State/bin-wise production profiles are also supported. Piecewise constant forcing is the default SERGIO-like behavior; continuous interpolation remains optional.
 
 ## Supported Outputs
 
@@ -77,6 +80,8 @@ The default output is a plain Python dictionary with:
 - `uns["kinetic_params"]`
 - `uns["simulation_config"]`
 - `time_grid`
+- optional `edge_contributions`
+- optional `uns["edge_metadata"]`
 
 Bifurcation dictionaries additionally include:
 
@@ -90,8 +95,8 @@ Optional AnnData export includes the required layers, obs columns, var metadata,
 ## Gene Metadata
 
 - `gene_role` is current structural GRN role metadata:
-  - `master_regulator`: no incoming edges, driven by external master programs
-  - `target`: has incoming GRN regulation
+  - `master_regulator`: explicit or inferred source gene with externally specified production rate
+  - `non_master`: gene whose production rate is computed from upstream GRN contributions
 - `gene_class` is reserved for future biological class labels.
 - In v0.1, `gene_class` is always `unassigned`.
 
@@ -145,6 +150,8 @@ Current tests cover:
 - No molecule-level SSA.
 - No protein or translation layer.
 - No SERGIO CLE implementation.
+- No SERGIO CLE/SDE implementation.
+- No default half-response auto-calibration workflow. Users should currently provide `half_response` explicitly.
 - No VeloSim EVF-to-kinetics mapping.
 - Noise is a minimal capture/Poisson/dropout model, not calibrated full UMI realism.
 - UMAP is qualitative and can fragment sparse/noisy toy data.

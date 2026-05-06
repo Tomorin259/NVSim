@@ -10,7 +10,7 @@ def test_validate_grn_fills_defaults_and_normalizes_signs():
         {
             "regulator": ["g1", "g2"],
             "target": ["g3", "g3"],
-            "weight": [1.0, 0.5],
+            "K": [1.0, 0.5],
             "sign": ["+", "rep"],
         }
     )
@@ -18,9 +18,27 @@ def test_validate_grn_fills_defaults_and_normalizes_signs():
     normalized = validate_grn(edges)
 
     assert list(normalized["sign"]) == ["activation", "repression"]
+    assert list(normalized["K"]) == [1.0, 0.5]
+    assert list(normalized["weight"]) == [1.0, 0.5]
     assert list(normalized["hill_coefficient"]) == [2.0, 2.0]
     assert list(normalized["half_response"]) == [1.0, 1.0]
     assert list(normalized["threshold"]) == [1.0, 1.0]
+
+
+def test_validate_grn_accepts_weight_alias_for_K():
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g1"],
+            "target": ["g2"],
+            "weight": [3.5],
+            "sign": ["activation"],
+        }
+    )
+
+    normalized = validate_grn(edges)
+
+    assert normalized.loc[0, "K"] == 3.5
+    assert normalized.loc[0, "weight"] == 3.5
 
 
 def test_validate_grn_accepts_half_response_and_keeps_threshold_alias():
@@ -28,7 +46,7 @@ def test_validate_grn_accepts_half_response_and_keeps_threshold_alias():
         {
             "regulator": ["g1"],
             "target": ["g2"],
-            "weight": [1.0],
+            "K": [1.0],
             "sign": ["activation"],
             "half_response": [2.5],
             "hill_coefficient": [2.0],
@@ -43,7 +61,7 @@ def test_validate_grn_accepts_half_response_and_keeps_threshold_alias():
 
 def test_validate_grn_rejects_negative_weights():
     edges = pd.DataFrame(
-        {"regulator": ["g1"], "target": ["g2"], "weight": [-1.0], "sign": ["activation"]}
+        {"regulator": ["g1"], "target": ["g2"], "K": [-1.0], "sign": ["activation"]}
     )
 
     with pytest.raises(ValueError, match="non-negative"):
@@ -52,7 +70,7 @@ def test_validate_grn_rejects_negative_weights():
 
 def test_grn_rejects_unknown_genes():
     edges = pd.DataFrame(
-        {"regulator": ["g1"], "target": ["g2"], "weight": [1.0], "sign": ["activation"]}
+        {"regulator": ["g1"], "target": ["g2"], "K": [1.0], "sign": ["activation"]}
     )
 
     with pytest.raises(ValueError, match="absent"):
@@ -65,18 +83,18 @@ def test_calibrate_half_response_from_series_updates_alias_columns():
             {
                 "regulator": ["g1", "g2"],
                 "target": ["g3", "g3"],
-                "weight": [1.0, 0.5],
+                "K": [1.0, 0.5],
                 "sign": ["activation", "repression"],
             }
         ),
         genes=["g1", "g2", "g3"],
     )
 
-    calibrated = calibrate_half_response(grn, pd.Series({"g1": 2.5, "g2": 0.0}))
+    calibrated = calibrate_half_response(grn, pd.Series({"g1": 2.5, "g2": 1.5}))
     edges = calibrated.to_dataframe()
 
-    assert list(edges["half_response"]) == [2.5, 0.0]
-    assert list(edges["threshold"]) == [2.5, 0.0]
+    assert list(edges["half_response"]) == [2.5, 1.5]
+    assert list(edges["threshold"]) == [2.5, 1.5]
 
 
 def test_calibrate_half_response_from_dataframe_uses_column_means():
@@ -85,7 +103,7 @@ def test_calibrate_half_response_from_dataframe_uses_column_means():
             {
                 "regulator": ["g1"],
                 "target": ["g2"],
-                "weight": [1.0],
+                "K": [1.0],
                 "sign": ["activation"],
             }
         ),
@@ -104,7 +122,7 @@ def test_calibrate_half_response_rejects_missing_regulator_mean():
             {
                 "regulator": ["g1"],
                 "target": ["g2"],
-                "weight": [1.0],
+                "K": [1.0],
                 "sign": ["activation"],
             }
         ),
@@ -113,3 +131,20 @@ def test_calibrate_half_response_rejects_missing_regulator_mean():
 
     with pytest.raises(ValueError, match="missing mean expression"):
         calibrate_half_response(grn, pd.Series({"g9": 1.0}))
+
+
+def test_grn_preserves_explicit_master_regulators():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "K": [1.0],
+                "sign": ["activation"],
+            }
+        ),
+        genes=["g0", "g1", "g2"],
+        master_regulators=["g2"],
+    )
+
+    assert grn.master_regulators == ("g2",)

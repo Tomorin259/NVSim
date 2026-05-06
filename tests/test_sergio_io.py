@@ -27,6 +27,8 @@ def test_load_sergio_targets_regs_maps_edges_and_master_production(tmp_path):
     edges = parsed.grn.to_dataframe()
 
     assert parsed.grn.genes == ("0", "1", "2")
+    assert parsed.master_regulators == ("0",)
+    assert parsed.grn.master_regulators == ("0",)
     assert parsed.master_production.equals(
         pd.DataFrame(
             {"0": [0.5, 1.0, 1.5]},
@@ -36,6 +38,7 @@ def test_load_sergio_targets_regs_maps_edges_and_master_production(tmp_path):
     )
     assert list(edges["regulator"]) == ["0", "0", "1"]
     assert list(edges["target"]) == ["1", "2", "2"]
+    assert list(edges["K"]) == [2.5, 1.0, 0.7]
     assert list(edges["weight"]) == [2.5, 1.0, 0.7]
     assert list(edges["sign"]) == ["activation", "repression", "activation"]
     assert list(edges["hill_coefficient"]) == [2.0, 3.0, 1.5]
@@ -49,6 +52,7 @@ def test_load_sergio_targets_regs_supports_shared_coop_state(tmp_path):
     edges = parsed.grn.to_dataframe()
 
     assert list(edges["sign"]) == ["repression"]
+    assert list(edges["K"]) == [1.2]
     assert list(edges["weight"]) == [1.2]
     assert list(edges["hill_coefficient"]) == [2.5]
 

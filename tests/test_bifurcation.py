@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from nvsim.grn import GRN
 from nvsim.production import StateProductionProfile
@@ -13,7 +14,7 @@ def _small_grn():
         {
             "regulator": ["g0", "g1"],
             "target": ["g2", "g3"],
-            "weight": [0.7, 0.4],
+            "K": [0.7, 0.4],
             "sign": ["activation", "repression"],
             "threshold": [0.5, 0.5],
             "hill_coefficient": [2.0, 2.0],
@@ -120,14 +121,70 @@ def test_bifurcation_can_use_state_production_profile():
     segments = result["uns"]["segment_time_courses"]
     assert np.allclose(segments["trunk"]["alpha"][:, 0], 0.4)
     assert np.allclose(segments["trunk"]["alpha"][:, 1], 0.5)
+    assert np.allclose(segments["branch_0"]["alpha"][:, 0], 1.2)
+    assert np.allclose(segments["branch_0"]["alpha"][:, 1], 0.2)
+    assert np.allclose(segments["branch_1"]["alpha"][:, 0], 0.1)
+    assert np.allclose(segments["branch_1"]["alpha"][:, 1], 1.3)
+    assert result["uns"]["simulation_config"]["production_profile"] is True
+
+
+def test_bifurcation_interpolation_is_optional_not_default():
+    production = StateProductionProfile(
+        pd.DataFrame(
+            {
+                "g0": [0.4, 1.2, 0.1],
+                "g1": [0.5, 0.2, 1.3],
+            },
+            index=["trunk_state", "branch_0_state", "branch_1_state"],
+        )
+    )
+
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=6,
+        n_branch_cells={"branch_0": 6, "branch_1": 6},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        production_profile=production,
+        trunk_production_state="trunk_state",
+        branch_production_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        interpolate_production=True,
+        seed=43,
+        poisson_observed=False,
+    )
+
+    segments = result["uns"]["segment_time_courses"]
     assert np.isclose(segments["branch_0"]["alpha"][0, 0], 0.4)
-    assert np.isclose(segments["branch_0"]["alpha"][0, 1], 0.5)
     assert np.isclose(segments["branch_0"]["alpha"][-1, 0], 1.2)
-    assert np.isclose(segments["branch_0"]["alpha"][-1, 1], 0.2)
-    assert np.isclose(segments["branch_1"]["alpha"][0, 0], 0.4)
     assert np.isclose(segments["branch_1"]["alpha"][0, 1], 0.5)
-    assert np.isclose(segments["branch_1"]["alpha"][-1, 0], 0.1)
     assert np.isclose(segments["branch_1"]["alpha"][-1, 1], 1.3)
     assert not np.allclose(segments["branch_0"]["alpha"][0], segments["branch_0"]["alpha"][-1])
-    assert not np.allclose(segments["branch_1"]["alpha"][0], segments["branch_1"]["alpha"][-1])
-    assert result["uns"]["simulation_config"]["production_profile"] is True
+
+
+def test_bifurcation_requires_known_production_states():
+    production = StateProductionProfile(pd.DataFrame({"g0": [0.4], "g1": [0.5]}, index=["trunk_state"]))
+
+    with pytest.raises(ValueError, match="unknown production state"):
+        simulate_bifurcation(
+            _small_grn(),
+            production_profile=production,
+            trunk_production_state="trunk_state",
+            branch_production_states={"branch_0": "missing", "branch_1": "missing"},
+        )
+
+
+def test_bifurcation_edge_contributions_have_expected_shape():
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=5,
+        n_branch_cells={"branch_0": 5, "branch_1": 5},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        seed=47,
+        poisson_observed=False,
+        return_edge_contributions=True,
+    )
+
+    assert result["edge_contributions"].shape == (15, result["uns"]["edge_metadata"].shape[0])

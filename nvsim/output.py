@@ -48,6 +48,8 @@ def make_result_dict(
     gamma: pd.Series,
     simulation_config: Any = None,
     time_grid: pd.DataFrame | None = None,
+    edge_contributions: np.ndarray | None = None,
+    edge_metadata: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """创建模拟器默认返回的 plain dict。
 
@@ -69,7 +71,7 @@ def make_result_dict(
     }
     _validate_layer_shapes(layers, n_obs=obs.shape[0], n_vars=var.shape[0])
 
-    return {
+    result = {
         "layers": layers,
         "obs": obs.copy(),
         "var": var.copy(),
@@ -80,6 +82,12 @@ def make_result_dict(
         },
         "time_grid": None if time_grid is None else time_grid.copy(),
     }
+    if edge_contributions is not None:
+        result["edge_contributions"] = np.asarray(edge_contributions).copy()
+        result["uns"]["edge_metadata"] = (
+            grn.to_dataframe() if edge_metadata is None else edge_metadata.copy()
+        )
+    return result
 
 
 def to_anndata(result: dict[str, Any]):
@@ -113,4 +121,7 @@ def to_anndata(result: dict[str, Any]):
         for key, value in result["uns"]["kinetic_params"].items()
     }
     adata.uns["simulation_config"] = result["uns"]["simulation_config"]
+    if "edge_contributions" in result:
+        adata.obsm["edge_contributions"] = np.asarray(result["edge_contributions"]).copy()
+        adata.uns["edge_metadata"] = result["uns"]["edge_metadata"].copy()
     return adata

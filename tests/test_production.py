@@ -66,5 +66,7 @@ def test_state_production_profile_rejects_unknown_state_and_bad_fraction():
 
     with pytest.raises(ValueError, match="unknown production state"):
         profile.source_alpha("bin_9")
+    with pytest.raises(ValueError, match="unknown production state"):
+        profile.validate_states(["bin_0", "bin_9"])
     with pytest.raises(ValueError, match="fraction"):
         profile.source_alpha_interpolated("bin_0", "bin_1", 1.1)

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from nvsim.grn import GRN
 from nvsim.production import StateProductionProfile
@@ -12,7 +13,7 @@ def _small_grn():
         {
             "regulator": ["g0", "g1"],
             "target": ["g2", "g3"],
-            "weight": [0.7, 0.4],
+            "K": [0.7, 0.4],
             "sign": ["activation", "repression"],
             "threshold": [0.5, 0.5],
             "hill_coefficient": [2.0, 2.0],
@@ -54,12 +55,52 @@ def test_var_metadata_distinguishes_gene_role_from_gene_class():
     var = result["var"]
 
     assert set(["gene_role", "gene_class"]).issubset(var.columns)
-    assert set(var["gene_role"]) == {"master_regulator", "target"}
+    assert set(var["gene_role"]) == {"master_regulator", "non_master"}
     assert set(var["gene_class"]) == {"unassigned"}
     assert var.loc["g0", "gene_role"] == "master_regulator"
     assert var.loc["g1", "gene_role"] == "master_regulator"
-    assert var.loc["g2", "gene_role"] == "target"
-    assert var.loc["g3", "gene_role"] == "target"
+    assert var.loc["g2", "gene_role"] == "non_master"
+    assert var.loc["g3", "gene_role"] == "non_master"
+
+
+def test_explicit_master_regulators_override_topology_inference():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0", "g1"],
+                "target": ["g1", "g2"],
+                "K": [0.5, 0.5],
+                "sign": ["activation", "activation"],
+                "half_response": [1.0, 1.0],
+                "hill_coefficient": [1.0, 1.0],
+            }
+        ),
+        genes=["g0", "g1", "g2"],
+    )
+    production = StateProductionProfile(pd.DataFrame({"g1": [1.5]}, index=["bin_0"]))
+    result = simulate_linear(
+        grn,
+        n_cells=8,
+        time_end=0.8,
+        dt=0.05,
+        master_regulators=["g1"],
+        production_profile=production,
+        production_state="bin_0",
+        seed=19,
+        poisson_observed=False,
+    )
+
+    assert np.allclose(result["layers"]["true_alpha"][:, 1], 1.5)
+    assert result["var"].loc["g1", "gene_role"] == "master_regulator"
+    assert result["var"].loc["g0", "gene_role"] == "non_master"
+
+
+def test_no_incoming_edge_inference_still_works_without_explicit_masters():
+    grn = _small_grn()
+    result = simulate_linear(grn, n_cells=8, time_end=0.8, dt=0.05, seed=23, poisson_observed=False)
+
+    assert result["var"].loc["g0", "gene_role"] == "master_regulator"
+    assert result["var"].loc["g1", "gene_role"] == "master_regulator"
 
 
 def test_same_seed_reproduces_sampled_cells():
@@ -109,9 +150,41 @@ def test_linear_simulation_requires_state_for_production_profile():
     grn = _small_grn()
     production = StateProductionProfile(pd.DataFrame({"g0": [1.0], "g1": [1.0]}, index=["bin_0"]))
 
-    pytest = __import__("pytest")
     with pytest.raises(ValueError, match="production_state"):
         simulate_linear(grn, production_profile=production)
+
+
+def test_target_leak_alpha_default_preserves_previous_behavior():
+    grn = _small_grn()
+    base = simulate_linear(grn, n_cells=10, time_end=0.8, dt=0.05, seed=29, poisson_observed=False)
+    leak0 = simulate_linear(
+        grn,
+        n_cells=10,
+        time_end=0.8,
+        dt=0.05,
+        seed=29,
+        poisson_observed=False,
+        target_leak_alpha=0.0,
+    )
+
+    assert np.allclose(base["layers"]["true_alpha"], leak0["layers"]["true_alpha"])
+
+
+def test_linear_edge_contributions_have_expected_shape():
+    grn = _small_grn()
+    result = simulate_linear(
+        grn,
+        n_cells=9,
+        time_end=0.8,
+        dt=0.05,
+        seed=31,
+        poisson_observed=False,
+        return_edge_contributions=True,
+    )
+
+    assert "edge_contributions" in result
+    assert result["edge_contributions"].shape == (9, grn.edges.shape[0])
+    assert "edge_metadata" in result["uns"]
 
 
 def test_optional_anndata_export_contains_expected_fields():

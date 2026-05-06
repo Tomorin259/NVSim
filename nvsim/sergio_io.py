@@ -32,6 +32,7 @@ class SergioInputs:
 
     grn: GRN
     master_production: pd.DataFrame
+    master_regulators: tuple[str, ...]
 
 
 def _read_csv_rows(path: str | Path) -> list[list[str]]:
@@ -110,7 +111,7 @@ def _parse_targets_rows(rows: list[list[str]], shared_coop_state: float) -> tupl
                 {
                     "regulator": regulator,
                     "target": target,
-                    "weight": abs(k),
+                    "K": abs(k),
                     "sign": "activation" if k > 0 else "repression",
                     "hill_coefficient": hill,
                 }
@@ -194,4 +195,8 @@ def load_sergio_targets_regs(
         raise ValueError(f"regulators missing from master regs or target rows: {unknown}")
 
     genes = _ordered_genes(master_ids, targets)
-    return SergioInputs(grn=GRN.from_dataframe(target_edges, genes=genes), master_production=master_production)
+    return SergioInputs(
+        grn=GRN.from_dataframe(target_edges, genes=genes, master_regulators=master_ids),
+        master_production=master_production,
+        master_regulators=tuple(master_ids),
+    )

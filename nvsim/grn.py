@@ -1,13 +1,17 @@
 """NVSim 的 GRN（gene regulatory network）表示与校验。
 
 本模块只负责“网络是什么”，不负责真正计算动力学。
-一张 GRN 表由多条 regulator -> target 边组成，每条边必须包含：
-regulator、target、weight、sign。可选列 hill_coefficient 和 half_response
-控制 Hill 调控响应的形状。
+NVSim 当前把 SERGIO-style GRN 参数标准化成：
 
-重要约定：weight 永远是非负数；activation/repression 只决定使用
-H_act(x) 还是 H_rep(x)。抑制边不再额外乘负号，这样 alpha 始终可以
-被解释为非负的 transcription-rate contribution。
+- regulator
+- target
+- sign
+- K
+- half_response
+- hill_coefficient
+
+为了兼容旧接口，``weight`` 作为 ``K`` 的别名保留，``threshold`` 作为
+``half_response`` 的别名保留。
 """
 
 from __future__ import annotations
@@ -20,9 +24,9 @@ import pandas as pd
 
 from .config import GRNConfig
 
-REQUIRED_COLUMNS = ("regulator", "target", "weight", "sign")
-OPTIONAL_COLUMNS = ("hill_coefficient", "half_response", "threshold")
-RETURN_COLUMNS = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
+REQUIRED_COLUMNS = ("regulator", "target", "sign")
+OPTIONAL_COLUMNS = ("K", "weight", "hill_coefficient", "half_response", "threshold")
+RETURN_COLUMNS = ("regulator", "target", "sign", "K", "weight", "half_response", "threshold", "hill_coefficient")
 VALID_SIGNS = {"activation", "repression"}
 _SIGN_ALIASES = {
     "activation": "activation",
@@ -90,6 +94,8 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
     missing = [col for col in REQUIRED_COLUMNS if col not in edges.columns]
     if missing:
         raise ValueError(f"GRN is missing required columns: {missing}")
+    if "K" not in edges.columns and "weight" not in edges.columns:
+        raise ValueError("GRN must contain either 'K' or 'weight'")
 
     normalized = edges.copy()
     for col in ("regulator", "target"):
@@ -97,14 +103,25 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
             raise ValueError(f"GRN column {col!r} contains missing values")
         normalized[col] = normalized[col].astype(str)
 
-    normalized["weight"] = pd.to_numeric(normalized["weight"], errors="raise")
-    weights = normalized["weight"].to_numpy(dtype=float)
-    if not np.isfinite(weights).all():
-        raise ValueError("GRN weights must be finite")
-    if (weights < 0).any():
-        raise ValueError("GRN weights must be non-negative; sign controls activation/repression")
-
     normalized["sign"] = normalized["sign"].map(normalize_sign)
+
+    if "K" in normalized.columns:
+        normalized["K"] = pd.to_numeric(normalized["K"], errors="raise")
+    if "weight" in normalized.columns:
+        normalized["weight"] = pd.to_numeric(normalized["weight"], errors="raise")
+    if "K" not in normalized.columns:
+        normalized["K"] = normalized["weight"]
+    if "weight" not in normalized.columns:
+        normalized["weight"] = normalized["K"]
+
+    K_values = normalized["K"].to_numpy(dtype=float)
+    weight_values = normalized["weight"].to_numpy(dtype=float)
+    if not np.isfinite(K_values).all() or not np.isfinite(weight_values).all():
+        raise ValueError("GRN K/weight values must be finite")
+    if (K_values < 0).any() or (weight_values < 0).any():
+        raise ValueError("GRN K/weight values must be non-negative; sign controls activation/repression")
+    if not np.allclose(K_values, weight_values):
+        raise ValueError("GRN columns 'K' and 'weight' must match when both are provided")
 
     if "hill_coefficient" not in normalized.columns:
         normalized["hill_coefficient"] = config.default_hill_coefficient
@@ -118,16 +135,21 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
         normalized["threshold"] = config.default_threshold
 
     for col in OPTIONAL_COLUMNS:
+        if col not in normalized.columns:
+            continue
         normalized[col] = pd.to_numeric(normalized[col], errors="raise")
         values = normalized[col].to_numpy(dtype=float)
         if not np.isfinite(values).all():
             raise ValueError(f"GRN column {col!r} must be finite")
-        if col == "hill_coefficient":
+        if col in {"K", "weight"}:
+            if (values < 0).any():
+                raise ValueError(f"GRN column {col!r} must be non-negative")
+        elif col == "hill_coefficient":
             if (values <= 0).any():
                 raise ValueError(f"GRN column {col!r} must be positive")
         else:
-            if (values < 0).any():
-                raise ValueError(f"GRN column {col!r} must be non-negative")
+            if (values <= 0).any():
+                raise ValueError(f"GRN column {col!r} must be positive")
 
     return normalized[list(RETURN_COLUMNS)]
 
@@ -157,9 +179,10 @@ def calibrate_half_response(
     calibrated = edges.copy()
     calibrated["half_response"] = calibrated["regulator"].map(means).astype(float)
     calibrated["threshold"] = calibrated["half_response"]
+    calibrated["K"] = calibrated["weight"]
 
     if isinstance(grn, GRN):
-        return GRN.from_dataframe(calibrated, genes=grn.genes)
+        return GRN.from_dataframe(calibrated, genes=grn.genes, master_regulators=grn.master_regulators)
     return calibrated
 
 
@@ -173,12 +196,14 @@ class GRN:
 
     edges: pd.DataFrame
     genes: tuple[str, ...]
+    master_regulators: tuple[str, ...] | None = None
 
     @classmethod
     def from_dataframe(
         cls,
         edges: pd.DataFrame,
         genes: Iterable[str] | None = None,
+        master_regulators: Iterable[str] | None = None,
         config: GRNConfig | None = None,
     ) -> "GRN":
         normalized = validate_grn(edges, config=config)
@@ -190,7 +215,13 @@ class GRN:
             unknown = set(normalized["regulator"]).union(normalized["target"]) - set(ordered_genes)
             if unknown:
                 raise ValueError(f"GRN contains genes absent from genes list: {sorted(unknown)}")
-        return cls(edges=normalized, genes=ordered_genes)
+        normalized_masters: tuple[str, ...] | None = None
+        if master_regulators is not None:
+            normalized_masters = tuple(str(gene) for gene in master_regulators)
+            missing_masters = sorted(set(normalized_masters) - set(ordered_genes))
+            if missing_masters:
+                raise ValueError(f"master regulators absent from genes list: {missing_masters}")
+        return cls(edges=normalized, genes=ordered_genes, master_regulators=normalized_masters)
 
     def to_dataframe(self) -> pd.DataFrame:
         """返回标准化边表的副本，避免外部代码直接修改 GRN 内部状态。"""

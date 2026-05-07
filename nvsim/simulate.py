@@ -17,7 +17,7 @@ from typing import Callable, Mapping
 import numpy as np
 import pandas as pd
 
-from .grn import GRN, build_graph_levels
+from .grn import GRN, build_graph_levels, calibrate_grn_thresholds
 from .kinetics import create_kinetic_vectors, initialize_state
 from .noise import generate_observed_counts
 from .output import make_result_dict
@@ -416,6 +416,38 @@ def _grn_calibration_summary(
     }
 
 
+def _maybe_calibrate_grn(
+    grn: GRN,
+    *,
+    master_genes: tuple[str, ...],
+    production_profile: StateProductionProfile | None,
+    auto_calibrate_half_response: bool | str,
+    grn_calibration: Mapping[str, object] | None,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
+) -> tuple[GRN, Mapping[str, object] | None]:
+    if auto_calibrate_half_response not in (False, True, "if_missing"):
+        raise ValueError("auto_calibrate_half_response must be False, True, or 'if_missing'")
+    if auto_calibrate_half_response is False:
+        return grn, grn_calibration
+    if production_profile is None:
+        raise ValueError("production_profile must be provided when auto_calibrate_half_response is enabled")
+
+    missing_half_response = bool(grn.edges["half_response"].isna().any())
+    if auto_calibrate_half_response == "if_missing" and not missing_half_response:
+        return grn, grn_calibration
+
+    calibrated_grn, calibration = calibrate_grn_thresholds(
+        grn,
+        production_profile.rates,
+        explicit_master_regulators=master_genes,
+        target_leak_alpha=target_leak_alpha,
+    )
+    merged = dict(grn_calibration or {})
+    merged.update(calibration)
+    merged["auto_calibrate_half_response"] = auto_calibrate_half_response
+    return calibrated_grn, merged
+
+
 def _gene_metadata(
     grn: GRN,
     master_genes: tuple[str, ...],
@@ -512,6 +544,7 @@ def simulate_linear(
     dropout_rate: float = 0.0,
     noise_model: str | None = None,
     capture_model: str = "scale_poisson",
+    auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
 ) -> dict:
@@ -543,6 +576,15 @@ def simulate_linear(
             raise ValueError("production_state must be provided when production_profile is used")
         production_profile.validate_master_genes(master_genes)
         production_profile.validate_states([production_state])
+    grn, grn_calibration = _maybe_calibrate_grn(
+        grn,
+        master_genes=master_genes,
+        production_profile=production_profile,
+        auto_calibrate_half_response=auto_calibrate_half_response,
+        grn_calibration=grn_calibration,
+        target_leak_alpha=target_leak_alpha,
+    )
+    if production_profile is not None:
         source_alpha = production_profile.source_alpha(production_state, genes=grn.genes)
 
     segment = _simulate_segment(
@@ -608,6 +650,7 @@ def simulate_linear(
         "explicit_master_regulators": list(master_genes),
         "production_profile": production_profile is not None,
         "production_state": production_state,
+        "auto_calibrate_half_response": auto_calibrate_half_response,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
         "noise_model": noise_model if noise_model is not None else ("binomial_capture" if capture_model == "binomial" else "poisson_capture"),
@@ -676,6 +719,7 @@ def simulate_bifurcation(
     dropout_rate: float = 0.0,
     noise_model: str | None = None,
     capture_model: str = "scale_poisson",
+    auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
 ) -> dict:
@@ -717,6 +761,15 @@ def simulate_bifurcation(
             raise ValueError(f"branch_production_states missing branches: {missing_branches}")
         production_profile.validate_master_genes(master_genes)
         production_profile.validate_states([trunk_production_state, *(branch_production_states[branch] for branch in branch_labels)])
+    grn, grn_calibration = _maybe_calibrate_grn(
+        grn,
+        master_genes=master_genes,
+        production_profile=production_profile,
+        auto_calibrate_half_response=auto_calibrate_half_response,
+        grn_calibration=grn_calibration,
+        target_leak_alpha=target_leak_alpha,
+    )
+    if production_profile is not None:
         trunk_source_alpha = production_profile.source_alpha(trunk_production_state, genes=grn.genes)
         for branch in branch_labels:
             if interpolate_production:
@@ -860,6 +913,7 @@ def simulate_bifurcation(
         "trunk_production_state": trunk_production_state,
         "branch_production_states": dict(branch_production_states) if branch_production_states is not None else None,
         "interpolate_production": interpolate_production,
+        "auto_calibrate_half_response": auto_calibrate_half_response,
         "branch_master_programs_enabled": branch_master_programs is not None,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,

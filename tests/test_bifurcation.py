@@ -23,6 +23,20 @@ def _small_grn():
     return GRN.from_dataframe(edges, genes=genes)
 
 
+def _small_grn_missing_half_response():
+    genes = ["g0", "g1", "g2", "g3"]
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g0", "g1"],
+            "target": ["g2", "g3"],
+            "K": [0.7, 0.4],
+            "sign": ["activation", "repression"],
+            "hill_coefficient": [2.0, 2.0],
+        }
+    )
+    return GRN.from_dataframe(edges, genes=genes)
+
+
 def _result(seed=17):
     return simulate_bifurcation(
         _small_grn(),
@@ -172,6 +186,38 @@ def test_bifurcation_requires_known_production_states():
             trunk_production_state="trunk_state",
             branch_production_states={"branch_0": "missing", "branch_1": "missing"},
         )
+
+
+def test_bifurcation_can_auto_calibrate_missing_half_response():
+    production = StateProductionProfile(
+        pd.DataFrame(
+            {
+                "g0": [0.4, 1.2, 0.1],
+                "g1": [0.5, 0.2, 1.3],
+            },
+            index=["trunk_state", "branch_0_state", "branch_1_state"],
+        )
+    )
+
+    result = simulate_bifurcation(
+        _small_grn_missing_half_response(),
+        n_trunk_cells=6,
+        n_branch_cells={"branch_0": 6, "branch_1": 6},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        production_profile=production,
+        trunk_production_state="trunk_state",
+        branch_production_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        auto_calibrate_half_response="if_missing",
+        seed=59,
+        poisson_observed=False,
+    )
+
+    assert result["uns"]["grn_calibration"]["calibration_method"] == "levelwise_state_mean"
+    assert result["uns"]["grn_calibration"]["thresholds_filled_count"] == 2
+    assert result["uns"]["simulation_config"]["auto_calibrate_half_response"] == "if_missing"
+    assert pd.DataFrame(result["uns"]["true_grn"])["half_response"].notna().all()
 
 
 def test_bifurcation_edge_contributions_have_expected_shape():

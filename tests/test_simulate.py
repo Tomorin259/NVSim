@@ -22,6 +22,20 @@ def _small_grn():
     return GRN.from_dataframe(edges, genes=genes)
 
 
+def _small_grn_missing_half_response():
+    genes = ["g0", "g1", "g2", "g3"]
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g0", "g1"],
+            "target": ["g2", "g3"],
+            "K": [0.7, 0.4],
+            "sign": ["activation", "repression"],
+            "hill_coefficient": [2.0, 2.0],
+        }
+    )
+    return GRN.from_dataframe(edges, genes=genes)
+
+
 def test_true_velocity_matches_formula_and_states_are_nonnegative():
     grn = _small_grn()
     result = simulate_linear(grn, n_cells=25, time_end=2.0, dt=0.02, seed=7, poisson_observed=False)
@@ -154,6 +168,49 @@ def test_linear_simulation_requires_state_for_production_profile():
 
     with pytest.raises(ValueError, match="production_state"):
         simulate_linear(grn, production_profile=production)
+
+
+def test_linear_simulation_still_requires_half_response_without_auto_calibration():
+    grn = _small_grn_missing_half_response()
+    production = StateProductionProfile(pd.DataFrame({"g0": [1.0], "g1": [1.0]}, index=["bin_0"]))
+
+    with pytest.raises(ValueError, match="missing half_response"):
+        simulate_linear(
+            grn,
+            n_cells=8,
+            time_end=0.8,
+            dt=0.05,
+            production_profile=production,
+            production_state="bin_0",
+            seed=37,
+            poisson_observed=False,
+        )
+
+
+def test_linear_simulation_can_auto_calibrate_missing_half_response():
+    grn = _small_grn_missing_half_response()
+    production = StateProductionProfile(
+        pd.DataFrame(
+            {"g0": [1.0, 1.5], "g1": [0.5, 1.25]},
+            index=["bin_0", "bin_1"],
+        )
+    )
+    result = simulate_linear(
+        grn,
+        n_cells=8,
+        time_end=0.8,
+        dt=0.05,
+        production_profile=production,
+        production_state="bin_0",
+        auto_calibrate_half_response="if_missing",
+        seed=41,
+        poisson_observed=False,
+    )
+
+    assert result["uns"]["grn_calibration"]["calibration_method"] == "levelwise_state_mean"
+    assert result["uns"]["grn_calibration"]["thresholds_filled_count"] == grn.edges.shape[0]
+    assert result["uns"]["simulation_config"]["auto_calibrate_half_response"] == "if_missing"
+    assert pd.DataFrame(result["uns"]["true_grn"])["half_response"].notna().all()
 
 
 def test_target_leak_alpha_default_preserves_previous_behavior():

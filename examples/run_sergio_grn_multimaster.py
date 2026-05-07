@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from nvsim.output import to_anndata
-from nvsim.programs import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
+from nvsim.production import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
 from nvsim.simulate import simulate_bifurcation
 
 from run_sergio_grn_bifurcation import DEFAULT_SERGIO_DOT, load_sergio_dot_grn, top_master_regulators

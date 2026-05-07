@@ -19,7 +19,7 @@ import pandas as pd
 
 from nvsim.grn import GRN
 from nvsim.output import to_anndata
-from nvsim.programs import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
+from nvsim.production import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
 from nvsim.simulate import simulate_bifurcation
 
 DEFAULT_SERGIO_DOT = ROOT.parent / "SERGIO" / "GNW_sampled_GRNs" / "Yeast_400_net3.dot"

@@ -21,7 +21,7 @@ from nvsim.plotting import (
     plot_gene_dynamics_over_pseudotime,
     plot_phase_portrait,
 )
-from nvsim.programs import linear_increase, sigmoid_decrease
+from nvsim.production import linear_increase, sigmoid_decrease
 from nvsim.simulate import simulate_linear
 
 

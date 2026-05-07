@@ -15,7 +15,7 @@ from nvsim.plotting import (
     plot_phase_portrait,
     select_representative_genes_by_dynamics,
 )
-from nvsim.programs import linear_decrease, linear_increase
+from nvsim.production import linear_decrease, linear_increase
 from nvsim.simulate import simulate_bifurcation, simulate_linear
 
 

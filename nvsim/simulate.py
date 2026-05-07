@@ -21,8 +21,7 @@ from .grn import GRN, build_graph_levels
 from .kinetics import create_kinetic_vectors, initialize_state
 from .noise import generate_observed_counts
 from .output import make_result_dict
-from .production import StateProductionProfile
-from .programs import AlphaProgram, coerce_programs, constant
+from .production import AlphaProgram, StateProductionProfile, coerce_programs, constant
 from .regulation import compute_alpha
 
 

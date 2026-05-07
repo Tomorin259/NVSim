@@ -4,7 +4,7 @@ import pytest
 
 from nvsim.grn import GRN
 from nvsim.production import StateProductionProfile
-from nvsim.programs import linear_decrease, linear_increase
+from nvsim.production import linear_decrease, linear_increase
 from nvsim.simulate import simulate_bifurcation
 
 

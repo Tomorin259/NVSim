@@ -1,6 +1,8 @@
 """NVSim: lightweight GRN-aware RNA velocity simulation utilities."""
 
 from .config import GRNConfig, SimulationConfig, TrajectoryConfig
+
+# GRN schema and regulation.
 from .grn import (
     GRN,
     build_graph_levels,
@@ -10,23 +12,39 @@ from .grn import (
     identify_master_regulators,
     validate_grn,
 )
-from .regulation import hill_activation, hill_repression, compute_alpha
-from .trajectory import make_bifurcation_trajectory, make_linear_trajectory
+from .regulation import compute_alpha, hill_activation, hill_repression
+
+# Trajectory and kinetic utilities.
 from .kinetics import create_kinetic_vectors, initialize_state, validate_positive_vector
-from .programs import AlphaProgram, constant, linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
-from .production import StateProductionProfile
+from .trajectory import make_bifurcation_trajectory, make_linear_trajectory
+
+# Master-regulator forcing definitions.
+from .production import (
+    AlphaProgram,
+    StateProductionProfile,
+    constant,
+    linear_decrease,
+    linear_increase,
+    sigmoid_decrease,
+    sigmoid_increase,
+)
+
+# Simulation and observed-layer generation.
 from .simulate import simulate_bifurcation, simulate_linear
 from .noise import generate_observed_counts
 from .output import make_result_dict, to_anndata
+
+# SERGIO-compatible inputs and quick-look plotting.
 from .sergio_io import SergioInputs, load_sergio_targets_regs
 from .plotting import (
     compute_pca_embedding,
     compute_umap_embedding,
-    plot_embedding_by_pseudotime,
     plot_embedding_by_branch,
+    plot_embedding_by_pseudotime,
     plot_embedding_with_velocity,
-    plot_phase_portrait,
     plot_gene_dynamics_over_pseudotime,
+    plot_phase_portrait,
+    plot_phase_portrait_gallery,
     select_representative_genes_by_dynamics,
 )
 
@@ -69,6 +87,7 @@ __all__ = [
     "plot_embedding_by_branch",
     "plot_embedding_with_velocity",
     "plot_phase_portrait",
+    "plot_phase_portrait_gallery",
     "plot_gene_dynamics_over_pseudotime",
     "select_representative_genes_by_dynamics",
 ]

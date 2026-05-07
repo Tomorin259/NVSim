@@ -13,7 +13,7 @@ import pandas as pd
 
 from nvsim.grn import GRN
 from nvsim.output import to_anndata
-from nvsim.programs import linear_increase, sigmoid_decrease
+from nvsim.production import linear_increase, sigmoid_decrease
 from nvsim.simulate import simulate_linear
 
 

@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 from run_mvp_linear import build_example_grn
 
 from nvsim.output import to_anndata
-from nvsim.programs import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
+from nvsim.production import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
 from nvsim.simulate import simulate_bifurcation
 
 

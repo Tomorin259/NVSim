@@ -14,8 +14,7 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 
 - `nvsim/grn.py`: validated GRN edge schema with canonical `K`, `half_response`, and `hill_coefficient`, plus backward-compatible aliases, master-regulator detection, graph-level metadata, and explicit threshold calibration helpers.
 - `nvsim/regulation.py`: SERGIO-style additive Hill activation/repression contributions and optional edge-level contribution output.
-- `nvsim/programs.py`: master regulator alpha programs: constant, linear increase/decrease, sigmoid increase/decrease.
-- `nvsim/production.py`: state/bin-wise master regulator production profiles.
+- `nvsim/production.py`: master-regulator forcing definitions, including time-dependent alpha programs and state/bin-wise production profiles.
 - `nvsim/kinetics.py`: beta/gamma vector creation or validation and non-negative initial `u0/s0` setup.
 - `nvsim/trajectory.py`: simple metadata builders for linear and bifurcation trajectories.
 - `nvsim/simulate.py`: RK4 ODE integration, linear simulation, bifurcation simulation, snapshot sampling, true and observed layer assembly.
@@ -23,6 +22,10 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 - `nvsim/output.py`: plain dictionary output and optional AnnData export.
 - `nvsim/plotting.py`: matplotlib-only PCA/UMAP embeddings, velocity quick-look arrows, phase portraits, gene dynamics, and bifurcation representative-gene selection by alpha divergence.
 - `nvsim/config.py`: lightweight dataclass configuration defaults.
+
+## Repository Layout
+
+The core simulator now uses a flat nvsim/*.py layout. Noise, output, plotting, production profiles, SERGIO input parsing, and trajectory metadata live in direct modules instead of one-file package directories, which improves readability and makes grep-based inspection easier.
 
 ## Current Modeling Chain
 
@@ -158,7 +161,6 @@ Current tests cover:
 - No promoter on/off switching.
 - No molecule-level SSA.
 - No protein or translation layer.
-- No SERGIO CLE implementation.
 - No SERGIO CLE/SDE implementation.
 - No default half-response auto-calibration workflow. Calibration exists, but it is still an explicit preprocessing step and not automatically applied inside every simulation call.
 - No VeloSim EVF-to-kinetics mapping.

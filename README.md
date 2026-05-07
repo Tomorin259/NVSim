@@ -143,6 +143,15 @@ Observed-count generation currently supports:
 
 Metadata such as `grn_calibration` and `noise_config` is stored in the plain result dict and carried into AnnData output.
 
+Half-response calibration is no longer limited to a separate preprocessing step.
+If a `StateProductionProfile` is available, `simulate_linear()` and
+`simulate_bifurcation()` can now run:
+
+- `auto_calibrate_half_response=False` (default): keep the old explicit behavior;
+- `auto_calibrate_half_response="if_missing"`: fill missing `half_response` only;
+- `auto_calibrate_half_response=True`: always recalibrate from the state/bin
+  production matrix before simulation.
+
 ### Documentation
 
 - [Current Status](CURRENT_STATUS.md)
@@ -257,6 +266,14 @@ python examples/plot_bifurcation.py
 - `binomial_capture`
 
 同时，`grn_calibration` 和 `noise_config` 会保存在 result dict 中，并在导出 AnnData 时保留下来。
+
+half-response calibration 也不再只能作为单独预处理步骤使用。
+如果提供了 `StateProductionProfile`，现在可以在
+`simulate_linear()` / `simulate_bifurcation()` 中直接使用：
+
+- `auto_calibrate_half_response=False`：保持原来的显式预处理行为；
+- `auto_calibrate_half_response="if_missing"`：只在缺失 `half_response` 时自动补齐；
+- `auto_calibrate_half_response=True`：在模拟前根据 state/bin production matrix 主动重校准。
 
 ### 相关文档
 

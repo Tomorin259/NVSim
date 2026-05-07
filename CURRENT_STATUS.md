@@ -45,9 +45,12 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - Repression contribution is `K * H_rep(s_j)`, with no negative sign.
 - `target_leak_alpha` defaults to `0.0`.
 - `u` and `s` are kept non-negative after integration steps.
-- `half_response` can be calibrated explicitly from state/bin production profiles:
-  - acyclic GRNs use level-wise state-mean propagation;
-  - cyclic GRNs use a documented fallback scale and remain valid for deterministic ODE stepping.
+- `half_response` can be calibrated from state/bin production profiles:
+  - explicitly, by calling the calibration helpers yourself;
+  - or directly inside `simulate_linear()` / `simulate_bifurcation()` through
+    `auto_calibrate_half_response=False | "if_missing" | True`.
+- Acyclic GRNs use level-wise state-mean propagation; cyclic GRNs use a
+  documented fallback scale and remain valid for deterministic ODE stepping.
 
 ## Supported Simulations
 
@@ -162,7 +165,8 @@ Current tests cover:
 - No molecule-level SSA.
 - No protein or translation layer.
 - No SERGIO CLE/SDE implementation.
-- No default half-response auto-calibration workflow. Calibration exists, but it is still an explicit preprocessing step and not automatically applied inside every simulation call.
+- Half-response auto-calibration is available in the simulation entry points,
+  but it is still opt-in rather than the unconditional default workflow.
 - No VeloSim EVF-to-kinetics mapping.
 - Noise is a minimal capture/Poisson/dropout model, not calibrated full UMI realism.
 - UMAP is qualitative and can fragment sparse/noisy toy data.

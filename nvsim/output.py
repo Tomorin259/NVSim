@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..grn import GRN
+from .grn import GRN
 
 
 def _plain_config(config: Any) -> Any:

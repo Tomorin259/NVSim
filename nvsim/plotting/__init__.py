@@ -24,6 +24,13 @@ import matplotlib.pyplot as plt
 
 
 VALID_LAYER_PREFERENCES = {"observed", "true", "auto"}
+DEFAULT_BRANCH_COLORS = {
+    "trunk": "tab:blue",
+    "branch_0": "tab:orange",
+    "branch_1": "tab:green",
+    "root": "tab:blue",
+    "all": "tab:blue",
+}
 
 
 def _is_anndata(obj: Any) -> bool:
@@ -227,6 +234,20 @@ def _new_ax(ax=None, figsize=(6, 5)):
     return fig, ax
 
 
+def _point_size(n_cells: int, emphasis: str = "default") -> float:
+    if emphasis == "dense":
+        return 10.0 if n_cells > 1200 else 14.0 if n_cells > 500 else 18.0
+    return 14.0 if n_cells > 1200 else 18.0 if n_cells > 500 else 24.0
+
+
+def _branch_color(branch: str, idx: int) -> str:
+    branch = str(branch)
+    if branch in DEFAULT_BRANCH_COLORS:
+        return DEFAULT_BRANCH_COLORS[branch]
+    cmap = plt.get_cmap("tab10")
+    return cmap(idx % 10)
+
+
 def _save(fig, output_path: str | Path | None):
     if output_path is not None:
         path = Path(output_path)
@@ -266,8 +287,17 @@ def plot_embedding_by_pseudotime(
 
     embedding, method_used, _ = _embedding_and_label(data, embedding, method, layer_preference, random_state)
     fig, ax = _new_ax(ax)
-    pts = ax.scatter(embedding[:, 0], embedding[:, 1], c=_pseudotime(data), cmap="viridis", s=22, linewidths=0)
-    ax.set_title(f"{method_used.upper()} {layer_preference} spliced by pseudotime")
+    pts = ax.scatter(
+        embedding[:, 0],
+        embedding[:, 1],
+        c=_pseudotime(data),
+        cmap="viridis",
+        s=_point_size(embedding.shape[0]),
+        alpha=0.9,
+        linewidths=0,
+        rasterized=embedding.shape[0] > 800,
+    )
+    ax.set_title(f"{method_used.upper()} {layer_preference} by pseudotime")
     ax.set_xlabel(f"{method_used.upper()} 1")
     ax.set_ylabel(f"{method_used.upper()} 2")
     fig.colorbar(pts, ax=ax, label="pseudotime")
@@ -288,11 +318,19 @@ def plot_embedding_by_branch(
     embedding, method_used, _ = _embedding_and_label(data, embedding, method, layer_preference, random_state)
     fig, ax = _new_ax(ax)
     branches = _branch(data)
-    cmap = plt.get_cmap("tab10")
     for idx, branch in enumerate(pd.unique(branches)):
         mask = branches == branch
-        ax.scatter(embedding[mask, 0], embedding[mask, 1], label=str(branch), s=22, color=cmap(idx % 10), linewidths=0)
-    ax.set_title(f"{method_used.upper()} {layer_preference} spliced by branch")
+        ax.scatter(
+            embedding[mask, 0],
+            embedding[mask, 1],
+            label=str(branch),
+            s=_point_size(mask.sum()),
+            color=_branch_color(str(branch), idx),
+            alpha=0.9,
+            linewidths=0,
+            rasterized=mask.sum() > 400,
+        )
+    ax.set_title(f"{method_used.upper()} {layer_preference} by branch")
     ax.set_xlabel(f"{method_used.upper()} 1")
     ax.set_ylabel(f"{method_used.upper()} 2")
     ax.legend(frameon=False, fontsize=8)
@@ -327,7 +365,7 @@ def plot_embedding_with_velocity(
         projected = np.pad(projected, ((0, 0), (0, 2 - projected.shape[1])))
     n_cells = embedding.shape[0]
     if stride is None:
-        stride = max(1, n_cells // 45)
+        stride = max(1, n_cells // 35)
     if max_arrow_length is None:
         x_span = float(np.ptp(embedding[:, 0]))
         y_span = float(np.ptp(embedding[:, 1]))
@@ -339,7 +377,16 @@ def plot_embedding_with_velocity(
         projected[too_long, :2] *= (max_arrow_length / lengths[too_long])[:, None]
     idx = np.arange(0, n_cells, stride)
     fig, ax = _new_ax(ax)
-    ax.scatter(embedding[:, 0], embedding[:, 1], c=_pseudotime(data), cmap="Greys", s=16, alpha=0.55, linewidths=0)
+    ax.scatter(
+        embedding[:, 0],
+        embedding[:, 1],
+        c=_pseudotime(data),
+        cmap="Greys",
+        s=_point_size(n_cells, emphasis="dense"),
+        alpha=0.45,
+        linewidths=0,
+        rasterized=n_cells > 800,
+    )
     ax.quiver(
         embedding[idx, 0],
         embedding[idx, 1],
@@ -348,14 +395,14 @@ def plot_embedding_with_velocity(
         angles="xy",
         scale_units="xy",
         scale=1.0 if scale is None else scale,
-        width=0.003,
+        width=0.0026,
         color="tab:red",
         alpha=0.8,
     )
     if method_used == "umap":
         title = "UMAP with PCA-projected true velocity (qualitative only)"
     else:
-        title = f"{method_used.upper()} {layer_preference} spliced with projected true velocity"
+        title = f"{method_used.upper()} {layer_preference} spliced with true velocity"
     ax.set_title(title)
     ax.set_xlabel(f"{method_used.upper()} 1")
     ax.set_ylabel(f"{method_used.upper()} 2")
@@ -369,6 +416,7 @@ def plot_phase_portrait(
     ax=None,
     mode: str = "true",
     use_true: bool | None = None,
+    connect_by_pseudotime: bool = False,
 ):
     """Plot unspliced versus spliced for one gene, colored by pseudotime.
 
@@ -395,7 +443,28 @@ def plot_phase_portrait(
     pts = None
     for b_idx, branch in enumerate(pd.unique(branches)):
         mask = branches == branch
-        pts = ax.scatter(u[mask], s[mask], c=_pseudotime(data)[mask], cmap="viridis", s=24, marker=markers[b_idx % len(markers)], edgecolors="black", linewidths=0.2, label=str(branch))
+        branch_pt = _pseudotime(data)[mask]
+        pts = ax.scatter(
+            u[mask],
+            s[mask],
+            c=branch_pt,
+            cmap="viridis",
+            s=_point_size(mask.sum()),
+            marker=markers[b_idx % len(markers)],
+            edgecolors="black",
+            linewidths=0.2,
+            label=str(branch),
+            rasterized=mask.sum() > 400,
+        )
+        if connect_by_pseudotime:
+            order = np.argsort(branch_pt)
+            ax.plot(
+                u[mask][order],
+                s[mask][order],
+                color=_branch_color(str(branch), b_idx),
+                linewidth=0.8,
+                alpha=0.5,
+            )
     ax.set_title(f"Phase portrait ({mode}): {_var_names(data)[idx]}")
     ax.set_xlabel(f"{u_layer}")
     ax.set_ylabel(f"{s_layer}")
@@ -405,8 +474,14 @@ def plot_phase_portrait(
     return _save(fig, output_path)
 
 
-def plot_gene_dynamics_over_pseudotime(data: Any, gene: str | int, output_path: str | Path | None = None, ax=None):
-    """Plot true alpha, unspliced, spliced, and velocity over pseudotime."""
+def plot_gene_dynamics_over_pseudotime(
+    data: Any,
+    gene: str | int,
+    output_path: str | Path | None = None,
+    ax=None,
+    include_velocity_u: bool = False,
+):
+    """Plot true alpha, u/s, velocity, and optional velocity_u over pseudotime."""
 
     idx = _gene_index(data, gene)
     pt = _pseudotime(data)
@@ -417,23 +492,126 @@ def plot_gene_dynamics_over_pseudotime(data: Any, gene: str | int, output_path: 
         "true_spliced": _matrix(data, "true_spliced")[:, idx],
         "true_velocity": _matrix(data, "true_velocity")[:, idx],
     }
+    if include_velocity_u:
+        quantities["true_velocity_u"] = _matrix(data, "true_velocity_u")[:, idx]
+    n_panels = len(quantities)
     if ax is None:
-        fig, axes = plt.subplots(4, 1, figsize=(7, 8), sharex=True)
+        fig, axes = plt.subplots(n_panels, 1, figsize=(7.2, 2.0 * n_panels + 0.6), sharex=True)
     else:
         fig = ax.figure
         axes = [ax]
-    cmap = plt.get_cmap("tab10")
+    axes = np.atleast_1d(axes)
     for q_idx, (name, values) in enumerate(quantities.items()):
         current_ax = axes[q_idx] if len(axes) > 1 else axes[0]
         for b_idx, branch in enumerate(pd.unique(branches)):
             mask = branches == branch
             order = np.argsort(pt[mask])
-            current_ax.plot(pt[mask][order], values[mask][order], marker="o", markersize=2.5, linewidth=1.0, color=cmap(b_idx % 10), label=str(branch))
+            current_ax.plot(
+                pt[mask][order],
+                values[mask][order],
+                marker="o",
+                markersize=2.5,
+                linewidth=1.2,
+                color=_branch_color(str(branch), b_idx),
+                label=str(branch),
+            )
         current_ax.set_ylabel(name)
         if q_idx == 0:
             current_ax.set_title(f"Gene dynamics: {_var_names(data)[idx]}")
+        if np.any(branches == "trunk"):
+            trunk_max = float(pt[branches == "trunk"].max())
+            current_ax.axvline(trunk_max, color="0.7", linestyle="--", linewidth=0.8)
     axes[-1].set_xlabel("pseudotime")
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
         axes[0].legend(handles, labels, frameon=False, fontsize=8)
+    return _save(fig, output_path)
+
+
+def plot_overview_panel(
+    noisy: Any,
+    lownoise: Any | None = None,
+    output_path: str | Path | None = None,
+    random_state: int = 0,
+):
+    """Create one quick-look panel for trajectory, branch, velocity, and noise views."""
+
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
+    plot_embedding_by_pseudotime(noisy, method="pca", layer_preference="true", ax=axes[0, 0])
+    plot_embedding_by_branch(noisy, method="pca", layer_preference="true", ax=axes[0, 1])
+    plot_embedding_with_velocity(noisy, method="pca", layer_preference="true", ax=axes[0, 2])
+    plot_embedding_by_branch(noisy, method="pca", layer_preference="observed", ax=axes[1, 0])
+    _, umap_method, _ = compute_umap_embedding(noisy, random_state=random_state, layer_preference="observed")
+    if umap_method == "umap":
+        plot_embedding_by_branch(noisy, method="umap", layer_preference="observed", random_state=random_state, ax=axes[1, 1])
+    else:
+        plot_embedding_by_pseudotime(noisy, method="pca", layer_preference="observed", ax=axes[1, 1])
+    if lownoise is not None:
+        plot_embedding_by_branch(lownoise, method="pca", layer_preference="observed", ax=axes[1, 2])
+        axes[1, 2].set_title("PCA observed_lownoise by branch")
+    else:
+        axes[1, 2].axis("off")
+    return _save(fig, output_path)
+
+
+def plot_selected_gene_panel(
+    data: Any,
+    selected: dict[str, str],
+    output_path: str | Path | None = None,
+    include_velocity_u: bool = True,
+):
+    """Create one panel that summarizes representative genes.
+
+    Layout: one row per selected gene, columns are true phase portrait,
+    observed phase portrait, and gene dynamics.
+    """
+
+    n_rows = len(selected)
+    fig = plt.figure(figsize=(16, 4.3 * n_rows), constrained_layout=True)
+    outer = fig.add_gridspec(n_rows, 3, width_ratios=[1.0, 1.0, 1.35])
+    for row, (label, gene) in enumerate(selected.items()):
+        ax_true = fig.add_subplot(outer[row, 0])
+        plot_phase_portrait(data, gene, mode="true", connect_by_pseudotime=True, ax=ax_true)
+        ax_true.set_title(f"{label}: {gene} true phase")
+        ax_obs = fig.add_subplot(outer[row, 1])
+        try:
+            plot_phase_portrait(data, gene, mode="observed", connect_by_pseudotime=False, ax=ax_obs)
+            ax_obs.set_title(f"{label}: {gene} observed phase")
+        except KeyError:
+            ax_obs.axis("off")
+        dynamic_names = ["true_alpha", "true_unspliced", "true_spliced", "true_velocity"]
+        if include_velocity_u:
+            dynamic_names.append("true_velocity_u")
+        inner = outer[row, 2].subgridspec(len(dynamic_names), 1, hspace=0.05)
+        values_map = {name: _matrix(data, name)[:, _gene_index(data, gene)] for name in dynamic_names}
+        pt = _pseudotime(data)
+        branches = _branch(data)
+        branch_values = pd.unique(branches)
+        trunk_max = float(pt[branches == "trunk"].max()) if np.any(branches == "trunk") else None
+        for q_idx, name in enumerate(dynamic_names):
+            ax_dyn = fig.add_subplot(inner[q_idx, 0])
+            for b_idx, branch in enumerate(branch_values):
+                mask = branches == branch
+                order = np.argsort(pt[mask])
+                ax_dyn.plot(
+                    pt[mask][order],
+                    values_map[name][mask][order],
+                    marker="o",
+                    markersize=2.2,
+                    linewidth=1.0,
+                    color=_branch_color(str(branch), b_idx),
+                    label=str(branch) if q_idx == 0 else None,
+                )
+            if trunk_max is not None:
+                ax_dyn.axvline(trunk_max, color="0.7", linestyle="--", linewidth=0.8)
+            ax_dyn.set_ylabel(name, fontsize=8)
+            if q_idx == 0:
+                ax_dyn.set_title(f"{label}: {gene} dynamics")
+                handles, labels = ax_dyn.get_legend_handles_labels()
+                if handles:
+                    ax_dyn.legend(handles, labels, frameon=False, fontsize=7, ncol=min(3, len(handles)))
+            if q_idx != len(dynamic_names) - 1:
+                ax_dyn.set_xticklabels([])
+            else:
+                ax_dyn.set_xlabel("pseudotime")
     return _save(fig, output_path)

@@ -17,7 +17,7 @@ from typing import Callable, Mapping
 import numpy as np
 import pandas as pd
 
-from .grn import GRN
+from .grn import GRN, build_graph_levels
 from .kinetics import create_kinetic_vectors, initialize_state
 from .noise import generate_observed_counts
 from .output import make_result_dict
@@ -397,13 +397,44 @@ def _prepare_common_inputs(
     )
 
 
-def _gene_metadata(grn: GRN, master_genes: tuple[str, ...]) -> pd.DataFrame:
+def _grn_calibration_summary(
+    grn: GRN,
+    master_genes: tuple[str, ...],
+    grn_calibration: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    if grn_calibration is not None:
+        return dict(grn_calibration)
+
+    level_info = build_graph_levels(grn, explicit_master_regulators=master_genes)
+    return {
+        "calibration_method": "not_recorded",
+        "master_regulators": list(master_genes),
+        "gene_levels": dict(level_info["gene_to_level"]),
+        "cyclic_or_acyclic": level_info["cyclic_or_acyclic"],
+        "thresholds_filled_count": 0,
+        "thresholds_missing_count": int(grn.edges["half_response"].isna().sum()),
+        "warnings": list(level_info["warnings"]),
+    }
+
+
+def _gene_metadata(
+    grn: GRN,
+    master_genes: tuple[str, ...],
+    *,
+    beta: pd.Series,
+    gamma: pd.Series,
+) -> pd.DataFrame:
     var = pd.DataFrame(index=pd.Index(grn.genes, name="gene"))
     master_set = set(master_genes)
-    var["gene_role"] = ["master_regulator" if gene in master_set else "non_master" for gene in grn.genes]
-    # Keep the gene_class column present for downstream compatibility, but reserve
-    # it for future biological class labels such as normal/MURK/branching genes.
+    var["gene_role"] = ["master_regulator" if gene in master_set else "target" for gene in grn.genes]
     var["gene_class"] = "unassigned"
+    level_info = build_graph_levels(grn, explicit_master_regulators=master_genes)
+    gene_level = pd.Series(pd.NA, index=var.index, dtype="Int64")
+    for gene, level in level_info["gene_to_level"].items():
+        gene_level.loc[gene] = int(level)
+    var["gene_level"] = gene_level
+    var["true_beta"] = beta.reindex(var.index).to_numpy(dtype=float)
+    var["true_gamma"] = gamma.reindex(var.index).to_numpy(dtype=float)
     return var
 
 
@@ -416,6 +447,8 @@ def _observed_from_true(
     capture_rate: float | None,
     poisson_observed: bool,
     dropout_rate: float,
+    noise_model: str | None = None,
+    capture_model: str = "scale_poisson",
 ) -> dict[str, np.ndarray]:
     return generate_observed_counts(
         true_u,
@@ -424,6 +457,8 @@ def _observed_from_true(
         capture_rate=capture_rate,
         poisson=poisson_observed,
         dropout_rate=dropout_rate,
+        noise_model=noise_model,
+        capture_model=capture_model,
     )
 
 
@@ -476,6 +511,9 @@ def simulate_linear(
     capture_rate: float | None = None,
     poisson_observed: bool = True,
     dropout_rate: float = 0.0,
+    noise_model: str | None = None,
+    capture_model: str = "scale_poisson",
+    grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
 ) -> dict:
     """Simulate a linear GRN-aware RNA velocity trajectory.
@@ -543,6 +581,8 @@ def simulate_linear(
         capture_rate=capture_rate,
         poisson_observed=poisson_observed,
         dropout_rate=dropout_rate,
+        noise_model=noise_model,
+        capture_model=capture_model,
     )
 
     obs = pd.DataFrame(
@@ -571,9 +611,17 @@ def simulate_linear(
         "production_state": production_state,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
+        "noise_model": noise_model if noise_model is not None else ("binomial_capture" if capture_model == "binomial" else "poisson_capture"),
+        "capture_model": capture_model,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
         "return_edge_contributions": return_edge_contributions,
+    }
+    noise_config = {
+        "noise_model": config["noise_model"],
+        "capture_rate": capture_rate,
+        "poisson_observed": poisson_observed,
+        "dropout_rate": dropout_rate,
     }
 
     edge_contributions = segment.get("edge_contributions")
@@ -588,11 +636,13 @@ def simulate_linear(
         observed_unspliced=observed["unspliced"],
         observed_spliced=observed["spliced"],
         obs=obs,
-        var=_gene_metadata(grn, master_genes),
+        var=_gene_metadata(grn, master_genes, beta=beta_series, gamma=gamma_series),
         grn=grn,
         beta=beta_series,
         gamma=gamma_series,
         simulation_config=config,
+        grn_calibration=_grn_calibration_summary(grn, master_genes, grn_calibration=grn_calibration),
+        noise_config=noise_config,
         time_grid=time_grid,
         edge_contributions=sampled_edge_contributions,
         edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
@@ -625,6 +675,9 @@ def simulate_bifurcation(
     capture_rate: float | None = None,
     poisson_observed: bool = True,
     dropout_rate: float = 0.0,
+    noise_model: str | None = None,
+    capture_model: str = "scale_poisson",
+    grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
 ) -> dict:
     """Simulate a trunk-to-two-branch RNA velocity trajectory.
@@ -747,6 +800,8 @@ def simulate_bifurcation(
         capture_rate=capture_rate,
         poisson_observed=poisson_observed,
         dropout_rate=dropout_rate,
+        noise_model=noise_model,
+        capture_model=capture_model,
     )
 
     obs_frames = []
@@ -809,9 +864,17 @@ def simulate_bifurcation(
         "branch_master_programs_enabled": branch_master_programs is not None,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
+        "noise_model": noise_model if noise_model is not None else ("binomial_capture" if capture_model == "binomial" else "poisson_capture"),
+        "capture_model": capture_model,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
         "return_edge_contributions": return_edge_contributions,
+    }
+    noise_config = {
+        "noise_model": config["noise_model"],
+        "capture_rate": capture_rate,
+        "poisson_observed": poisson_observed,
+        "dropout_rate": dropout_rate,
     }
 
     sampled_edge_contributions = None
@@ -830,11 +893,13 @@ def simulate_bifurcation(
         observed_unspliced=observed["unspliced"],
         observed_spliced=observed["spliced"],
         obs=obs,
-        var=_gene_metadata(grn, master_genes),
+        var=_gene_metadata(grn, master_genes, beta=beta_series, gamma=gamma_series),
         grn=grn,
         beta=beta_series,
         gamma=gamma_series,
         simulation_config=config,
+        grn_calibration=_grn_calibration_summary(grn, master_genes, grn_calibration=grn_calibration),
+        noise_config=noise_config,
         time_grid=time_grid,
         edge_contributions=sampled_edge_contributions,
         edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,

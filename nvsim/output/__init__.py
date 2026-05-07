@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .grn import GRN
+from ..grn import GRN
 
 
 def _plain_config(config: Any) -> Any:
@@ -47,6 +47,8 @@ def make_result_dict(
     beta: pd.Series,
     gamma: pd.Series,
     simulation_config: Any = None,
+    grn_calibration: Any = None,
+    noise_config: Any = None,
     time_grid: pd.DataFrame | None = None,
     edge_contributions: np.ndarray | None = None,
     edge_metadata: pd.DataFrame | None = None,
@@ -79,6 +81,8 @@ def make_result_dict(
             "true_grn": grn.to_dataframe(),
             "kinetic_params": {"beta": beta.copy(), "gamma": gamma.copy()},
             "simulation_config": _plain_config(simulation_config),
+            "grn_calibration": _plain_config(grn_calibration),
+            "noise_config": _plain_config(noise_config),
         },
         "time_grid": None if time_grid is None else time_grid.copy(),
     }
@@ -121,6 +125,8 @@ def to_anndata(result: dict[str, Any]):
         for key, value in result["uns"]["kinetic_params"].items()
     }
     adata.uns["simulation_config"] = result["uns"]["simulation_config"]
+    adata.uns["grn_calibration"] = result["uns"]["grn_calibration"]
+    adata.uns["noise_config"] = result["uns"]["noise_config"]
     if "edge_contributions" in result:
         adata.obsm["edge_contributions"] = np.asarray(result["edge_contributions"]).copy()
         adata.uns["edge_metadata"] = result["uns"]["edge_metadata"].copy()

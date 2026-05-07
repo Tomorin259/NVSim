@@ -112,6 +112,8 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - Regulation uses additive Hill-style activation and repression contributions.
 - State/bin-wise production is the default SERGIO-like forcing behavior.
 - Continuous interpolation between production states is optional and remains an NVSim extension.
+- Acyclic GRNs can use a SERGIO-style level-wise half-response calibration pass; cyclic GRNs fall back to a user/reference scale and are still supported by ODE time stepping.
+- Observed counts can use either the original scale-plus-Poisson path or a VeloSim-style binomial capture model.
 
 ## Current v0.1 Scope
 
@@ -128,8 +130,7 @@ Explicitly not included yet:
 - Normal/MURK/branching gene classes.
 - Promoter switching.
 - SERGIO CLE or other stochastic simulator paths.
-- Half-response auto-calibration as a default workflow. Users should currently provide
-  `half_response` explicitly; a DAG-only SERGIO-like calibration pass may be added later.
+- Half-response auto-calibration as a default workflow. Calibration is available, but it is still an explicit preprocessing step rather than the default simulation path.
 - VeloSim EVF-to-kinetics mapping.
 - Full scVelo-style velocity embedding.
 - Calibrated large-scale UMI realism.

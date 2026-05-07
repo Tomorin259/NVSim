@@ -18,7 +18,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from .grn import GRN
+from ..grn import GRN
 
 
 @dataclass(frozen=True)

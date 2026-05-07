@@ -20,7 +20,15 @@ from nvsim.simulate import simulate_bifurcation, simulate_linear
 
 def _result():
     grn = GRN.from_dataframe(
-        pd.DataFrame({"regulator": ["g0"], "target": ["g1"], "weight": [0.8], "sign": ["activation"]}),
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "weight": [0.8],
+                "sign": ["activation"],
+                "half_response": [0.5],
+            }
+        ),
         genes=["g0", "g1", "g2"],
     )
     return simulate_linear(grn, n_cells=12, time_end=1.0, dt=0.05, seed=21)
@@ -88,6 +96,7 @@ def test_dynamic_representative_selection_prefers_valid_edge_types():
                 "target": ["g2", "g3"],
                 "weight": [0.8, 0.7],
                 "sign": ["activation", "repression"],
+                "half_response": [0.5, 0.5],
             }
         ),
         genes=["g0", "g1", "g2", "g3"],

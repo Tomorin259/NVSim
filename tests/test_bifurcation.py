@@ -188,3 +188,23 @@ def test_bifurcation_edge_contributions_have_expected_shape():
     )
 
     assert result["edge_contributions"].shape == (15, result["uns"]["edge_metadata"].shape[0])
+
+
+def test_bifurcation_output_contains_standardized_metadata():
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=5,
+        n_branch_cells={"branch_0": 5, "branch_1": 5},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        seed=53,
+        poisson_observed=False,
+        noise_model="poisson_capture",
+    )
+
+    assert set(["gene_role", "gene_class", "gene_level", "true_beta", "true_gamma"]).issubset(result["var"].columns)
+    assert set(["true_grn", "grn_calibration", "kinetic_params", "simulation_config", "noise_config"]).issubset(
+        result["uns"].keys()
+    )
+    assert result["uns"]["noise_config"]["noise_model"] == "poisson_capture"

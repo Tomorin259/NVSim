@@ -2,7 +2,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nvsim.grn import GRN, calibrate_half_response, validate_grn
+from nvsim.grn import (
+    GRN,
+    build_graph_levels,
+    calibrate_grn_thresholds,
+    calibrate_half_response,
+    estimate_state_mean_expression,
+    identify_master_regulators,
+    validate_grn,
+)
 
 
 def test_validate_grn_fills_defaults_and_normalizes_signs():
@@ -21,8 +29,8 @@ def test_validate_grn_fills_defaults_and_normalizes_signs():
     assert list(normalized["K"]) == [1.0, 0.5]
     assert list(normalized["weight"]) == [1.0, 0.5]
     assert list(normalized["hill_coefficient"]) == [2.0, 2.0]
-    assert list(normalized["half_response"]) == [1.0, 1.0]
-    assert list(normalized["threshold"]) == [1.0, 1.0]
+    assert normalized["half_response"].isna().all()
+    assert normalized["threshold"].isna().all()
 
 
 def test_validate_grn_accepts_weight_alias_for_K():
@@ -57,6 +65,19 @@ def test_validate_grn_accepts_half_response_and_keeps_threshold_alias():
 
     assert normalized.loc[0, "half_response"] == 2.5
     assert normalized.loc[0, "threshold"] == 2.5
+
+
+def test_validate_grn_keeps_missing_half_response_for_later_calibration():
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g1"],
+            "target": ["g2"],
+            "K": [1.0],
+            "sign": ["activation"],
+        }
+    )
+    normalized = validate_grn(edges)
+    assert np.isnan(normalized.loc[0, "half_response"])
 
 
 def test_validate_grn_rejects_negative_weights():
@@ -148,3 +169,133 @@ def test_grn_preserves_explicit_master_regulators():
     )
 
     assert grn.master_regulators == ("g2",)
+
+
+def test_identify_master_regulators_fallback_and_explicit_override():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0", "g1"],
+                "target": ["g2", "g3"],
+                "K": [1.0, 1.0],
+                "sign": ["activation", "activation"],
+                "half_response": [1.0, 1.0],
+                "hill_coefficient": [2.0, 2.0],
+            }
+        ),
+        genes=["g0", "g1", "g2", "g3"],
+    )
+    masters, targets = identify_master_regulators(grn)
+    assert masters == ("g0", "g1")
+    assert targets == ("g2", "g3")
+
+    masters2, targets2 = identify_master_regulators(grn, explicit_master_regulators=["g1"])
+    assert masters2 == ("g1",)
+    assert targets2 == ("g0", "g2", "g3")
+
+
+def test_build_graph_levels_returns_levelwise_order_for_acyclic_grn():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0", "g0", "g1"],
+                "target": ["g1", "g2", "g3"],
+                "K": [1.0, 1.0, 1.0],
+                "sign": ["activation", "activation", "activation"],
+                "half_response": [1.0, 1.0, 1.0],
+                "hill_coefficient": [2.0, 2.0, 2.0],
+            }
+        ),
+        genes=["g0", "g1", "g2", "g3"],
+        master_regulators=["g0"],
+    )
+
+    levels = build_graph_levels(grn)
+    assert levels["cyclic_or_acyclic"] == "acyclic"
+    assert levels["gene_to_level"] == {"g0": 0, "g1": 1, "g2": 1, "g3": 2}
+
+
+def test_build_graph_levels_marks_cycles_without_crashing():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0", "g1"],
+                "target": ["g1", "g0"],
+                "K": [1.0, 1.0],
+                "sign": ["activation", "activation"],
+                "half_response": [1.0, 1.0],
+                "hill_coefficient": [2.0, 2.0],
+            }
+        ),
+        genes=["g0", "g1"],
+    )
+
+    levels = build_graph_levels(grn)
+    assert levels["cyclic_or_acyclic"] == "cyclic"
+    assert set(levels["unresolved_genes"]) == {"g0", "g1"}
+    assert levels["warnings"]
+
+
+def test_estimate_state_mean_expression_propagates_levelwise_for_acyclic_grn():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "K": [2.0],
+                "sign": ["activation"],
+                "half_response": [1.0],
+                "hill_coefficient": [1.0],
+            }
+        ),
+        genes=["g0", "g1"],
+        master_regulators=["g0"],
+    )
+    production = pd.DataFrame({"g0": [1.0, 3.0]}, index=["bin_0", "bin_1"])
+    means, meta = estimate_state_mean_expression(grn, production)
+    assert meta["cyclic_or_acyclic"] == "acyclic"
+    assert np.allclose(means.loc[:, "g0"], [1.0, 3.0])
+    assert np.allclose(means.loc[:, "g1"], [1.0, 1.5])
+
+
+def test_calibrate_grn_thresholds_fills_missing_half_response():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "K": [2.0],
+                "sign": ["activation"],
+                "hill_coefficient": [1.0],
+            }
+        ),
+        genes=["g0", "g1"],
+        master_regulators=["g0"],
+    )
+    production = pd.DataFrame({"g0": [1.0, 3.0]}, index=["bin_0", "bin_1"])
+    calibrated, meta = calibrate_grn_thresholds(grn, production)
+    edges = calibrated.to_dataframe()
+    assert np.isclose(edges.loc[0, "half_response"], 2.0)
+    assert np.isclose(edges.loc[0, "threshold"], 2.0)
+    assert meta["thresholds_filled_count"] == 1
+
+
+def test_calibrate_grn_thresholds_uses_fallback_for_cyclic_grn():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0", "g1"],
+                "target": ["g1", "g0"],
+                "K": [1.0, 1.0],
+                "sign": ["activation", "activation"],
+                "hill_coefficient": [1.0, 1.0],
+            }
+        ),
+        genes=["g0", "g1"],
+        master_regulators=["g0"],
+    )
+    production = pd.DataFrame({"g0": [2.0]}, index=["bin_0"])
+    calibrated, meta = calibrate_grn_thresholds(grn, production, fallback_half_response=1.5)
+    edges = calibrated.to_dataframe()
+    assert meta["calibration_method"] == "fallback_for_cyclic_grn"
+    assert np.allclose(edges["half_response"], [1.5, 1.5])

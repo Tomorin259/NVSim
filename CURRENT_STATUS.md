@@ -12,14 +12,14 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 
 ## Implemented Modules
 
-- `nvsim/grn.py`: validated GRN edge schema with canonical `K`, `half_response`, and `hill_coefficient`, plus backward-compatible aliases.
+- `nvsim/grn.py`: validated GRN edge schema with canonical `K`, `half_response`, and `hill_coefficient`, plus backward-compatible aliases, master-regulator detection, graph-level metadata, and explicit threshold calibration helpers.
 - `nvsim/regulation.py`: SERGIO-style additive Hill activation/repression contributions and optional edge-level contribution output.
 - `nvsim/programs.py`: master regulator alpha programs: constant, linear increase/decrease, sigmoid increase/decrease.
 - `nvsim/production.py`: state/bin-wise master regulator production profiles.
 - `nvsim/kinetics.py`: beta/gamma vector creation or validation and non-negative initial `u0/s0` setup.
 - `nvsim/trajectory.py`: simple metadata builders for linear and bifurcation trajectories.
 - `nvsim/simulate.py`: RK4 ODE integration, linear simulation, bifurcation simulation, snapshot sampling, true and observed layer assembly.
-- `nvsim/noise.py`: observed layer generation with capture scaling, optional Poisson sampling, and optional dropout.
+- `nvsim/noise.py`: observed layer generation with capture scaling, optional Poisson sampling, optional VeloSim-style binomial capture, and optional dropout.
 - `nvsim/output.py`: plain dictionary output and optional AnnData export.
 - `nvsim/plotting.py`: matplotlib-only PCA/UMAP embeddings, velocity quick-look arrows, phase portraits, gene dynamics, and bifurcation representative-gene selection by alpha divergence.
 - `nvsim/config.py`: lightweight dataclass configuration defaults.
@@ -42,6 +42,9 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - Repression contribution is `K * H_rep(s_j)`, with no negative sign.
 - `target_leak_alpha` defaults to `0.0`.
 - `u` and `s` are kept non-negative after integration steps.
+- `half_response` can be calibrated explicitly from state/bin production profiles:
+  - acyclic GRNs use level-wise state-mean propagation;
+  - cyclic GRNs use a documented fallback scale and remain valid for deterministic ODE stepping.
 
 ## Supported Simulations
 
@@ -127,7 +130,9 @@ True-layer plots are the primary scientific validation views. Observed plots are
 Current tests cover:
 
 - GRN schema validation, sign normalization, default Hill parameters, non-negative weights, unknown-gene rejection.
+- Explicit master-regulator override, no-incoming-edge fallback, graph-level metadata, and cyclic/acyclic calibration behavior.
 - Hill activation/repression behavior and repression contribution without negative sign.
+- VeloSim-style binomial capture noise.
 - Kinetic and simulation output dimensions.
 - Alpha, unspliced, and spliced non-negativity.
 - True velocity formula.
@@ -151,7 +156,7 @@ Current tests cover:
 - No protein or translation layer.
 - No SERGIO CLE implementation.
 - No SERGIO CLE/SDE implementation.
-- No default half-response auto-calibration workflow. Users should currently provide `half_response` explicitly.
+- No default half-response auto-calibration workflow. Calibration exists, but it is still an explicit preprocessing step and not automatically applied inside every simulation call.
 - No VeloSim EVF-to-kinetics mapping.
 - Noise is a minimal capture/Poisson/dropout model, not calibrated full UMI realism.
 - UMAP is qualitative and can fragment sparse/noisy toy data.

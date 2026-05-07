@@ -66,8 +66,8 @@ def compute_alpha(
     master regulators 的 production rate 直接来自 ``source_alpha``。
     non-master genes 的 alpha 按 SERGIO-style additive Hill contribution 计算：
 
-    - activation: contribution = weight * H_act(s_regulator)
-    - repression: contribution = weight * H_rep(s_regulator)
+    - activation: contribution = K * H_act(s_regulator)
+    - repression: contribution = K * H_rep(s_regulator)
 
     所有 contribution 加到 non-master target 的 ``target_leak_alpha`` 上，
     最后按 ``alpha_min`` 和可选 ``alpha_max`` 裁剪。
@@ -105,6 +105,10 @@ def compute_alpha(
 
     for idx, edge in enumerate(edges.itertuples(index=False)):
         x = float(values.get(edge.regulator, 0.0))
+        if pd.isna(edge.half_response):
+            raise ValueError(
+                f"edge {edge.regulator}->{edge.target} is missing half_response; provide it explicitly or run calibration first"
+            )
         if edge.sign == "activation":
             response = hill_activation(x, edge.half_response, edge.hill_coefficient)
         else:

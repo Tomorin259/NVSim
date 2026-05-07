@@ -54,13 +54,15 @@ def test_var_metadata_distinguishes_gene_role_from_gene_class():
     result = simulate_linear(grn, n_cells=12, time_end=1.0, dt=0.05, seed=13, poisson_observed=False)
     var = result["var"]
 
-    assert set(["gene_role", "gene_class"]).issubset(var.columns)
-    assert set(var["gene_role"]) == {"master_regulator", "non_master"}
+    assert set(["gene_role", "gene_class", "gene_level", "true_beta", "true_gamma"]).issubset(var.columns)
+    assert set(var["gene_role"]) == {"master_regulator", "target"}
     assert set(var["gene_class"]) == {"unassigned"}
     assert var.loc["g0", "gene_role"] == "master_regulator"
     assert var.loc["g1", "gene_role"] == "master_regulator"
-    assert var.loc["g2", "gene_role"] == "non_master"
-    assert var.loc["g3", "gene_role"] == "non_master"
+    assert var.loc["g2", "gene_role"] == "target"
+    assert var.loc["g3", "gene_role"] == "target"
+    assert int(var.loc["g0", "gene_level"]) == 0
+    assert int(var.loc["g2", "gene_level"]) == 1
 
 
 def test_explicit_master_regulators_override_topology_inference():
@@ -92,7 +94,7 @@ def test_explicit_master_regulators_override_topology_inference():
 
     assert np.allclose(result["layers"]["true_alpha"][:, 1], 1.5)
     assert result["var"].loc["g1", "gene_role"] == "master_regulator"
-    assert result["var"].loc["g0", "gene_role"] == "non_master"
+    assert result["var"].loc["g0", "gene_role"] == "target"
 
 
 def test_no_incoming_edge_inference_still_works_without_explicit_masters():
@@ -208,8 +210,29 @@ def test_optional_anndata_export_contains_expected_fields():
         "true_alpha",
     ]).issubset(adata.layers.keys())
     assert set(["pseudotime", "branch"]).issubset(adata.obs.columns)
-    assert set(["gene_role", "gene_class"]).issubset(adata.var.columns)
-    assert set(["true_grn", "kinetic_params", "simulation_config"]).issubset(adata.uns.keys())
+    assert set(["gene_role", "gene_class", "gene_level", "true_beta", "true_gamma"]).issubset(adata.var.columns)
+    assert set(["true_grn", "kinetic_params", "simulation_config", "grn_calibration", "noise_config"]).issubset(adata.uns.keys())
+    assert adata.layers["true_velocity_u"].shape == (8, 4)
+
+
+def test_result_uns_contains_grn_and_noise_metadata():
+    grn = _small_grn()
+    result = simulate_linear(
+        grn,
+        n_cells=8,
+        time_end=1.0,
+        dt=0.05,
+        seed=5,
+        capture_rate=0.3,
+        noise_model="binomial_capture",
+    )
+
+    assert set(["true_grn", "grn_calibration", "kinetic_params", "simulation_config", "noise_config"]).issubset(
+        result["uns"].keys()
+    )
+    assert result["uns"]["noise_config"]["noise_model"] == "binomial_capture"
+    assert result["var"]["true_beta"].shape[0] == 4
+    assert result["var"]["true_gamma"].shape[0] == 4
 
 
 def test_constant_alpha_linear_ode_approaches_steady_state():

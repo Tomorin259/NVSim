@@ -85,9 +85,9 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
     输入的 ``edges`` 是 pandas DataFrame。这里会检查必需列、缺失值、
     权重非负、Hill 参数为正，并把 sign 统一成标准字符串。
 
-    返回值仍然是 DataFrame，但列顺序固定，且缺失的 ``hill_coefficient``
-    和 ``half_response`` 会用 ``GRNConfig`` 默认值补齐。``threshold`` 是
-    旧接口兼容别名，会和 ``half_response`` 保持一致。
+    返回值仍然是 DataFrame，但列顺序固定。``threshold`` 是旧接口兼容别名，
+    会和 ``half_response`` 保持同步。若 ``half_response`` 缺失，则保留为
+    ``NaN``，留给后续校准流程填充。
     """
 
     config = config or GRNConfig()
@@ -130,28 +130,161 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
     if "threshold" not in normalized.columns and "half_response" in normalized.columns:
         normalized["threshold"] = normalized["half_response"]
     if "half_response" not in normalized.columns:
-        normalized["half_response"] = config.default_threshold
+        normalized["half_response"] = np.nan
     if "threshold" not in normalized.columns:
-        normalized["threshold"] = config.default_threshold
+        normalized["threshold"] = normalized["half_response"]
 
     for col in OPTIONAL_COLUMNS:
         if col not in normalized.columns:
             continue
         normalized[col] = pd.to_numeric(normalized[col], errors="raise")
         values = normalized[col].to_numpy(dtype=float)
-        if not np.isfinite(values).all():
-            raise ValueError(f"GRN column {col!r} must be finite")
         if col in {"K", "weight"}:
+            if not np.isfinite(values).all():
+                raise ValueError(f"GRN column {col!r} must be finite")
             if (values < 0).any():
                 raise ValueError(f"GRN column {col!r} must be non-negative")
         elif col == "hill_coefficient":
+            if not np.isfinite(values).all():
+                raise ValueError(f"GRN column {col!r} must be finite")
             if (values <= 0).any():
                 raise ValueError(f"GRN column {col!r} must be positive")
         else:
-            if (values <= 0).any():
+            finite_mask = ~np.isnan(values)
+            if not np.isfinite(values[finite_mask]).all():
+                raise ValueError(f"GRN column {col!r} must be finite when provided")
+            if (values[finite_mask] <= 0).any():
                 raise ValueError(f"GRN column {col!r} must be positive")
 
     return normalized[list(RETURN_COLUMNS)]
+
+
+def identify_master_regulators(
+    grn: GRN | pd.DataFrame,
+    explicit_master_regulators: Iterable[str] | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return master regulators and non-master genes.
+
+    Priority:
+    1. explicit_master_regulators
+    2. GRN.master_regulators
+    3. no-incoming-edge inference
+    """
+
+    if isinstance(grn, GRN):
+        edges = grn.edges
+        genes = grn.genes
+        stored_masters = grn.master_regulators
+    else:
+        edges = validate_grn(grn)
+        genes = tuple(sorted(set(edges["regulator"]).union(edges["target"])))
+        stored_masters = None
+
+    if explicit_master_regulators is not None:
+        masters = tuple(str(gene) for gene in explicit_master_regulators)
+    elif stored_masters is not None:
+        masters = tuple(str(gene) for gene in stored_masters)
+    else:
+        incoming = set(edges["target"].astype(str))
+        masters = tuple(str(gene) for gene in genes if str(gene) not in incoming)
+
+    missing = sorted(set(masters) - set(map(str, genes)))
+    if missing:
+        raise ValueError(f"master regulators absent from gene list: {missing}")
+    master_set = set(masters)
+    non_masters = tuple(str(gene) for gene in genes if str(gene) not in master_set)
+    return masters, non_masters
+
+
+def build_graph_levels(
+    grn: GRN | pd.DataFrame,
+    explicit_master_regulators: Iterable[str] | None = None,
+) -> dict[str, object]:
+    """Build SERGIO-style level metadata without requiring acyclicity.
+
+    For acyclic GRNs, returns exact ``gene_to_level`` with master regulators at
+    level 0. For cyclic GRNs, returns partial level metadata and warnings but
+    does not fail.
+    """
+
+    if isinstance(grn, GRN):
+        edges = grn.edges
+        genes = tuple(str(gene) for gene in grn.genes)
+    else:
+        edges = validate_grn(grn)
+        genes = tuple(sorted(set(edges["regulator"].astype(str)).union(edges["target"].astype(str))))
+
+    masters, _ = identify_master_regulators(grn, explicit_master_regulators)
+    incoming: dict[str, set[str]] = {gene: set() for gene in genes}
+    outgoing: dict[str, set[str]] = {gene: set() for gene in genes}
+    autoregulated: list[str] = []
+    for edge in edges.itertuples(index=False):
+        regulator = str(edge.regulator)
+        target = str(edge.target)
+        outgoing[regulator].add(target)
+        incoming[target].add(regulator)
+        if regulator == target:
+            autoregulated.append(regulator)
+
+    visited: set[str] = set()
+    active: set[str] = set()
+    cycle_nodes: set[str] = set()
+
+    def dfs(node: str) -> None:
+        visited.add(node)
+        active.add(node)
+        for nxt in outgoing[node]:
+            if nxt not in visited:
+                dfs(nxt)
+            elif nxt in active:
+                cycle_nodes.update({node, nxt})
+        active.remove(node)
+
+    for gene in genes:
+        if gene not in visited:
+            dfs(gene)
+
+    unresolved = set(genes)
+    gene_to_level: dict[str, int] = {}
+    level_to_genes: dict[int, list[str]] = {}
+    current = list(masters)
+    if current:
+        level_to_genes[0] = sorted(current)
+        for gene in current:
+            gene_to_level[gene] = 0
+            unresolved.discard(gene)
+
+    level = 1
+    while unresolved:
+        current_set = {gene for gene in unresolved if incoming[gene].issubset(set(gene_to_level))}
+        if not current_set:
+            break
+        level_to_genes[level] = sorted(current_set)
+        for gene in current_set:
+            gene_to_level[gene] = level
+            unresolved.discard(gene)
+        level += 1
+
+    cyclic = bool(unresolved) or bool(autoregulated) or bool(cycle_nodes)
+    warnings: list[str] = []
+    if autoregulated:
+        warnings.append(f"autoregulation detected for genes: {sorted(set(autoregulated))}")
+    if cycle_nodes:
+        warnings.append(f"directed cycle detected involving genes: {sorted(cycle_nodes)}")
+    if unresolved:
+        warnings.append(f"cycle or unresolved dependency detected for genes: {sorted(unresolved)}")
+
+    return {
+        "master_regulators": masters,
+        "target_genes": tuple(gene for gene in genes if gene not in set(masters)),
+        "gene_to_level": gene_to_level,
+        "level_to_genes": {level: tuple(genes_) for level, genes_ in sorted(level_to_genes.items())},
+        "cyclic_or_acyclic": "cyclic" if cyclic else "acyclic",
+        "autoregulated_genes": tuple(sorted(set(autoregulated))),
+        "cycle_genes": tuple(sorted(cycle_nodes)),
+        "unresolved_genes": tuple(sorted(unresolved)),
+        "warnings": tuple(warnings),
+    }
 
 
 def calibrate_half_response(
@@ -184,6 +317,121 @@ def calibrate_half_response(
     if isinstance(grn, GRN):
         return GRN.from_dataframe(calibrated, genes=grn.genes, master_regulators=grn.master_regulators)
     return calibrated
+
+
+def estimate_state_mean_expression(
+    grn: GRN,
+    state_production: pd.DataFrame,
+    *,
+    explicit_master_regulators: Iterable[str] | None = None,
+    target_leak_alpha: float | pd.Series | dict[str, float] = 0.0,
+    fallback_half_response: float = 1.0,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Estimate state-wise mean expression proxies for half-response calibration.
+
+    For acyclic GRNs, this follows graph levels from masters outward. For cyclic
+    GRNs, a fallback expression table is returned and metadata marks the
+    approximation.
+    """
+
+    state_production = state_production.copy()
+    state_production.index = state_production.index.astype(str)
+    state_production.columns = state_production.columns.astype(str)
+    state_production = state_production.astype(float)
+
+    levels = build_graph_levels(grn, explicit_master_regulators=explicit_master_regulators)
+    masters = tuple(levels["master_regulators"])
+    state_production = state_production.reindex(columns=list(masters), fill_value=0.0)
+    means = pd.DataFrame(0.0, index=state_production.index, columns=list(grn.genes), dtype=float)
+    means.loc[:, masters] = state_production.loc[:, masters]
+
+    if np.isscalar(target_leak_alpha):
+        leak = pd.Series(float(target_leak_alpha), index=pd.Index(grn.genes, name="gene"), dtype=float)
+    else:
+        leak = pd.Series(target_leak_alpha, dtype=float).reindex(grn.genes, fill_value=0.0)
+    leak = leak.clip(lower=0.0)
+
+    if levels["cyclic_or_acyclic"] == "cyclic":
+        fallback = pd.DataFrame(fallback_half_response, index=state_production.index, columns=list(grn.genes), dtype=float)
+        fallback.loc[:, masters] = state_production.loc[:, masters]
+        return fallback, levels
+
+    for level in sorted(levels["level_to_genes"]):
+        if level == 0:
+            continue
+        for gene in levels["level_to_genes"][level]:
+            gene_edges = grn.edges.loc[grn.edges["target"].astype(str) == str(gene)]
+            gene_mean = pd.Series(float(leak.get(gene, 0.0)), index=state_production.index, dtype=float)
+            for edge in gene_edges.itertuples(index=False):
+                reg_values = means.loc[:, str(edge.regulator)].to_numpy(dtype=float)
+                half_response = edge.half_response if not pd.isna(edge.half_response) else fallback_half_response
+                numerator = np.power(reg_values, edge.hill_coefficient)
+                denominator = np.power(half_response, edge.hill_coefficient) + numerator
+                act = np.divide(numerator, denominator, out=np.zeros_like(numerator, dtype=float), where=denominator > 0)
+                response = 1.0 - act if edge.sign == "repression" else act
+                gene_mean = gene_mean + float(edge.K) * response
+            means.loc[:, str(gene)] = np.maximum(gene_mean.to_numpy(dtype=float), 0.0)
+
+    return means, levels
+
+
+def calibrate_grn_thresholds(
+    grn: GRN | pd.DataFrame,
+    state_production: pd.DataFrame,
+    *,
+    explicit_master_regulators: Iterable[str] | None = None,
+    method: str = "mean",
+    fallback_half_response: float = 1.0,
+    target_leak_alpha: float | pd.Series | dict[str, float] = 0.0,
+) -> tuple[GRN | pd.DataFrame, dict[str, object]]:
+    """Calibrate half-response values using state/bin-wise expression proxies."""
+
+    if isinstance(grn, GRN):
+        grn_obj = grn
+        edges = grn.to_dataframe()
+    else:
+        edges = validate_grn(grn)
+        grn_obj = GRN.from_dataframe(edges)
+
+    state_means, level_info = estimate_state_mean_expression(
+        grn_obj,
+        state_production,
+        explicit_master_regulators=explicit_master_regulators,
+        target_leak_alpha=target_leak_alpha,
+        fallback_half_response=fallback_half_response,
+    )
+    calibrated = edges.copy()
+    filled = 0
+    calibration_method = "fallback_for_cyclic_grn" if level_info["cyclic_or_acyclic"] == "cyclic" else "levelwise_state_mean"
+    for idx, edge in calibrated.iterrows():
+        if pd.notna(edge["half_response"]):
+            continue
+        if level_info["cyclic_or_acyclic"] == "cyclic":
+            value = float(fallback_half_response)
+        else:
+            regulator_values = state_means[str(edge["regulator"])].to_numpy(dtype=float)
+            nonzero = regulator_values[regulator_values > 0]
+            if method == "median_nonzero":
+                value = float(np.nanmedian(nonzero)) if nonzero.size else float(fallback_half_response)
+            else:
+                value = float(np.nanmean(regulator_values)) if regulator_values.size else float(fallback_half_response)
+        if not np.isfinite(value) or value <= 0:
+            value = float(fallback_half_response)
+        calibrated.loc[idx, "half_response"] = value
+        calibrated.loc[idx, "threshold"] = value
+        filled += 1
+
+    metadata = {
+        "calibration_method": calibration_method if len(calibrated) else "none",
+        "master_regulators": level_info["master_regulators"],
+        "gene_levels": level_info["gene_to_level"],
+        "cyclic_or_acyclic": level_info["cyclic_or_acyclic"],
+        "thresholds_filled_count": int(filled),
+        "warnings": level_info["warnings"],
+    }
+    if isinstance(grn, GRN):
+        return GRN.from_dataframe(calibrated, genes=grn.genes, master_regulators=grn.master_regulators), metadata
+    return calibrated, metadata
 
 
 @dataclass(frozen=True)

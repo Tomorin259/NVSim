@@ -1,7 +1,15 @@
 """NVSim: lightweight GRN-aware RNA velocity simulation utilities."""
 
 from .config import GRNConfig, SimulationConfig, TrajectoryConfig
-from .grn import GRN, calibrate_half_response, validate_grn
+from .grn import (
+    GRN,
+    build_graph_levels,
+    calibrate_grn_thresholds,
+    calibrate_half_response,
+    estimate_state_mean_expression,
+    identify_master_regulators,
+    validate_grn,
+)
 from .regulation import hill_activation, hill_repression, compute_alpha
 from .trajectory import make_bifurcation_trajectory, make_linear_trajectory
 from .kinetics import create_kinetic_vectors, initialize_state, validate_positive_vector
@@ -27,6 +35,10 @@ __all__ = [
     "GRNConfig",
     "SimulationConfig",
     "TrajectoryConfig",
+    "identify_master_regulators",
+    "build_graph_levels",
+    "estimate_state_mean_expression",
+    "calibrate_grn_thresholds",
     "calibrate_half_response",
     "validate_grn",
     "hill_activation",

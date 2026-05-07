@@ -114,6 +114,8 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - Continuous interpolation between production states is optional and remains an NVSim extension.
 - Acyclic GRNs can use a SERGIO-style level-wise half-response calibration pass; cyclic GRNs fall back to a user/reference scale and are still supported by ODE time stepping.
 - Observed counts can use either the original scale-plus-Poisson path or a VeloSim-style binomial capture model.
+- Supported observed-count modes are `scale_poisson` and `binomial_capture`.
+- `grn_calibration` and `noise_config` are stored in the plain result dict and carried into AnnData metadata.
 
 ## Current v0.1 Scope
 

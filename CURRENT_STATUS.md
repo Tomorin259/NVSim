@@ -73,6 +73,7 @@ The default output is a plain Python dictionary with:
 - `layers["true_unspliced"]`
 - `layers["true_spliced"]`
 - `layers["true_velocity"]`
+- `layers["true_velocity_u"]`
 - `layers["true_alpha"]`
 - `obs["pseudotime"]`
 - `obs["local_time"]`
@@ -80,8 +81,10 @@ The default output is a plain Python dictionary with:
 - `var["gene_role"]`
 - `var["gene_class"]`
 - `uns["true_grn"]`
+- `uns["grn_calibration"]`
 - `uns["kinetic_params"]`
 - `uns["simulation_config"]`
+- `uns["noise_config"]`
 - `time_grid`
 - optional `edge_contributions`
 - optional `uns["edge_metadata"]`
@@ -94,6 +97,7 @@ Bifurcation dictionaries additionally include:
 Layer matrices are cells x genes. Internal segment time courses are timepoints x genes.
 
 Optional AnnData export includes the required layers, obs columns, var metadata, and uns fields when `anndata` is installed.
+Observed count generation currently supports both `scale_poisson` and VeloSim-style `binomial_capture`.
 
 ## Gene Metadata
 

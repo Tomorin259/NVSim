@@ -215,6 +215,21 @@ def test_optional_anndata_export_contains_expected_fields():
     assert adata.layers["true_velocity_u"].shape == (8, 4)
 
 
+def test_optional_anndata_export_can_write_h5ad(tmp_path):
+    pytest = __import__("pytest")
+    pytest.importorskip("anndata")
+    from nvsim.output import to_anndata
+
+    grn = _small_grn()
+    result = simulate_linear(grn, n_cells=8, time_end=1.0, dt=0.05, seed=5)
+    adata = to_anndata(result)
+    path = tmp_path / "roundtrip.h5ad"
+    adata.write_h5ad(path)
+
+    assert path.exists()
+    assert path.stat().st_size > 0
+
+
 def test_result_uns_contains_grn_and_noise_metadata():
     grn = _small_grn()
     result = simulate_linear(

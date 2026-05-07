@@ -4,7 +4,7 @@
 当前支持两种 capture 路径：
 
 - ``scale_poisson``: 先做 capture scaling，再可选 Poisson 采样
-- ``binomial``: VeloSim-style molecule capture,
+- ``binomial_capture``: VeloSim-style molecule capture,
   ``Obs ~ Binomial(round(True), capture_rate)``
 """
 
@@ -25,11 +25,17 @@ def generate_observed_counts(
 ) -> dict[str, np.ndarray]:
     """根据 true u/s 生成 observed unspliced/spliced。
 
-    ``capture_model='scale_poisson'`` 时，处理顺序是：
+    ``capture_model='scale_poisson'`` 或 ``noise_model='poisson_capture'`` 时，
+    处理顺序是：
     可选 capture scaling -> 可选 Poisson 采样 -> 可选 dropout。
 
-    ``capture_model='binomial'`` 时，处理顺序是：
+    ``capture_model='binomial_capture'``、``capture_model='binomial'`` 或
+    ``noise_model='binomial_capture'`` 时，处理顺序是：
     round(true counts) -> Binomial capture -> 可选 dropout。
+
+    对 binomial capture，当前使用 ``np.rint(true_counts).astype(int)`` 作为
+    latent molecule count，然后做按分子捕获。默认不再对 binomial 结果重复
+    Poisson 采样，因为 binomial capture 本身已经是离散观测步骤。
 
     如果 ``poisson=False``，observed layer 会保留连续值，适合低噪声可视化
     或调试；它不是现实 UMI count 模型。

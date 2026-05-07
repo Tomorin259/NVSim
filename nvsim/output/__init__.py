@@ -26,6 +26,31 @@ def _plain_config(config: Any) -> Any:
     return config
 
 
+def _anndata_safe(value: Any) -> Any:
+    if isinstance(value, pd.DataFrame):
+        frame = value.copy()
+        frame.columns = frame.columns.astype(str)
+        frame.index = frame.index.astype(str)
+        return {
+            "index": frame.index.tolist(),
+            "columns": frame.columns.tolist(),
+            "data": frame.to_numpy().tolist(),
+        }
+    if isinstance(value, pd.Series):
+        series = value.copy()
+        series.index = series.index.astype(str)
+        return {"index": series.index.tolist(), "data": series.tolist(), "name": series.name}
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): _anndata_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_anndata_safe(item) for item in value]
+    return value
+
+
 def _validate_layer_shapes(layers: dict[str, np.ndarray], n_obs: int, n_vars: int) -> None:
     expected = (n_obs, n_vars)
     for name, value in layers.items():
@@ -119,15 +144,12 @@ def to_anndata(result: dict[str, Any]):
         "true_alpha",
     ):
         adata.layers[name] = layers[name]
-    adata.uns["true_grn"] = result["uns"]["true_grn"].copy()
-    adata.uns["kinetic_params"] = {
-        key: value.to_dict() if hasattr(value, "to_dict") else value
-        for key, value in result["uns"]["kinetic_params"].items()
-    }
-    adata.uns["simulation_config"] = result["uns"]["simulation_config"]
-    adata.uns["grn_calibration"] = result["uns"]["grn_calibration"]
-    adata.uns["noise_config"] = result["uns"]["noise_config"]
+    adata.uns["true_grn"] = _anndata_safe(result["uns"]["true_grn"])
+    adata.uns["kinetic_params"] = _anndata_safe(result["uns"]["kinetic_params"])
+    adata.uns["simulation_config"] = _anndata_safe(result["uns"]["simulation_config"])
+    adata.uns["grn_calibration"] = _anndata_safe(result["uns"]["grn_calibration"])
+    adata.uns["noise_config"] = _anndata_safe(result["uns"]["noise_config"])
     if "edge_contributions" in result:
         adata.obsm["edge_contributions"] = np.asarray(result["edge_contributions"]).copy()
-        adata.uns["edge_metadata"] = result["uns"]["edge_metadata"].copy()
+        adata.uns["edge_metadata"] = _anndata_safe(result["uns"]["edge_metadata"])
     return adata

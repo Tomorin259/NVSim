@@ -18,6 +18,7 @@ from nvsim.plotting import (
     plot_embedding_by_branch,
     plot_gene_dynamics_over_pseudotime,
     plot_overview_panel,
+    plot_phase_portrait_gallery,
     plot_phase_portrait,
     plot_selected_gene_panel,
     select_representative_genes_by_dynamics,
@@ -103,6 +104,15 @@ def main() -> None:
     plot_overview_panel(noisy, lownoise=lownoise, random_state=2088, output_path=generated[-1])
     generated.append(overview_dir / "selected_genes_panel.png")
     plot_selected_gene_panel(noisy, selected, include_velocity_u=True, output_path=generated[-1])
+    generated.append(genes_dir / "all_genes_phase_portraits_true.png")
+    plot_phase_portrait_gallery(
+        noisy,
+        mode="true",
+        connect_by_pseudotime=True,
+        max_cols=5,
+        panel_size=2.0,
+        output_path=generated[-1],
+    )
 
     generated.append(true_dir / "embedding_pca_true_by_branch.png")
     plot_embedding_by_branch(noisy, method="pca", layer_preference="true", output_path=generated[-1])

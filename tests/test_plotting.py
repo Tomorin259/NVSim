@@ -11,6 +11,7 @@ from nvsim.plotting import (
     plot_embedding_by_pseudotime,
     plot_embedding_with_velocity,
     plot_gene_dynamics_over_pseudotime,
+    plot_phase_portrait_gallery,
     plot_phase_portrait,
     select_representative_genes_by_dynamics,
 )
@@ -84,6 +85,16 @@ def test_plotting_handles_anndata_when_available(tmp_path: Path):
     path = tmp_path / "adata_phase.png"
     plot_phase_portrait(adata, "g0", mode="true", output_path=path)
     plt.close("all")
+    assert path.exists()
+    assert path.stat().st_size > 0
+
+
+def test_phase_portrait_gallery_saves_thumbnail_grid(tmp_path: Path):
+    result = _result()
+    path = tmp_path / "gallery.png"
+    fig = plot_phase_portrait_gallery(result, mode="true", max_cols=2, output_path=path)
+    plt.close(fig)
+
     assert path.exists()
     assert path.stat().st_size > 0
 

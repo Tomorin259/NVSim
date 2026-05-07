@@ -474,6 +474,63 @@ def plot_phase_portrait(
     return _save(fig, output_path)
 
 
+def plot_phase_portrait_gallery(
+    data: Any,
+    genes: list[str] | tuple[str, ...] | None = None,
+    output_path: str | Path | None = None,
+    mode: str = "true",
+    use_true: bool | None = None,
+    connect_by_pseudotime: bool = False,
+    max_cols: int = 6,
+    panel_size: float = 2.0,
+):
+    """Render phase portraits for many genes as a thumbnail grid.
+
+    This is intended for smaller datasets where inspecting every gene's
+    unspliced/spliced trajectory is practical. By default it uses the true
+    layers; observed layers can be requested with ``mode='observed'``.
+    """
+
+    if use_true is not None:
+        mode = "true" if use_true else "observed"
+    if mode not in {"true", "observed"}:
+        raise ValueError("mode must be 'true' or 'observed'")
+    gene_names = _var_names(data) if genes is None else [str(gene) for gene in genes]
+    if not gene_names:
+        raise ValueError("at least one gene is required for phase portrait gallery")
+    if max_cols <= 0:
+        raise ValueError("max_cols must be positive")
+
+    n_genes = len(gene_names)
+    n_cols = min(max_cols, n_genes)
+    n_rows = int(np.ceil(n_genes / n_cols))
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(panel_size * n_cols, panel_size * n_rows + 0.3),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    axes_flat = axes.ravel()
+    for ax, gene in zip(axes_flat, gene_names):
+        plot_phase_portrait(
+            data,
+            gene,
+            ax=ax,
+            mode=mode,
+            connect_by_pseudotime=connect_by_pseudotime,
+        )
+        ax.set_title(str(gene), fontsize=8)
+        ax.legend_.remove() if ax.legend_ is not None else None
+        ax.tick_params(labelsize=7)
+        ax.xaxis.label.set_size(7)
+        ax.yaxis.label.set_size(7)
+    for ax in axes_flat[n_genes:]:
+        ax.axis("off")
+    fig.suptitle(f"Phase portrait gallery ({mode})", fontsize=12)
+    return _save(fig, output_path)
+
+
 def plot_gene_dynamics_over_pseudotime(
     data: Any,
     gene: str | int,

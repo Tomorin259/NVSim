@@ -220,6 +220,56 @@ def test_bifurcation_can_auto_calibrate_missing_half_response():
     assert pd.DataFrame(result["uns"]["true_grn"])["half_response"].notna().all()
 
 
+def test_bifurcation_regulator_activity_modes_propagate_to_trunk_and_branches():
+    genes = ["g0", "g1"]
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "K": [1.0],
+                "sign": ["activation"],
+                "half_response": [1.0],
+                "hill_coefficient": [1.0],
+            }
+        ),
+        genes=genes,
+    )
+    kwargs = dict(
+        n_trunk_cells=2,
+        n_branch_cells={"branch_0": 2, "branch_1": 2},
+        trunk_time=0.1,
+        branch_time=0.1,
+        dt=0.1,
+        beta=np.array([0.1, 0.1]),
+        gamma=np.array([0.1, 0.1]),
+        u0=np.array([2.0, 0.0]),
+        s0=np.array([5.0, 0.0]),
+        master_programs={"g0": 0.0},
+        seed=67,
+        poisson_observed=False,
+    )
+
+    spliced = simulate_bifurcation(grn, regulator_activity="spliced", **kwargs)
+    unspliced = simulate_bifurcation(grn, regulator_activity="unspliced", **kwargs)
+    total = simulate_bifurcation(grn, regulator_activity="total", **kwargs)
+
+    expected_spliced = 5.0 / 6.0
+    expected_unspliced = 2.0 / 3.0
+    expected_total = 7.0 / 8.0
+
+    for result, expected, mode in [
+        (spliced, expected_spliced, "spliced"),
+        (unspliced, expected_unspliced, "unspliced"),
+        (total, expected_total, "total"),
+    ]:
+        segments = result["uns"]["segment_time_courses"]
+        assert np.isclose(segments["trunk"]["alpha"][0, 1], expected)
+        assert np.isclose(segments["branch_0"]["alpha"][0, 1], expected)
+        assert np.isclose(segments["branch_1"]["alpha"][0, 1], expected)
+        assert result["uns"]["simulation_config"]["regulator_activity"] == mode
+
+
 def test_bifurcation_edge_contributions_have_expected_shape():
     result = simulate_bifurcation(
         _small_grn(),

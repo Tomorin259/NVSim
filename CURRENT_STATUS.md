@@ -45,8 +45,8 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
   - `spliced` (default): use `s_j(t)`
   - `unspliced`: use `u_j(t)`
   - `total`: use `u_j(t) + s_j(t)`
-- Activation contribution is `K * H_act(s_j)`.
-- Repression contribution is `K * H_rep(s_j)`, with no negative sign.
+- Activation contribution is `K * H_act(activity_j)`.
+- Repression contribution is `K * H_rep(activity_j)`, with no negative sign.
 - `target_leak_alpha` defaults to `0.0`.
 - `u` and `s` are kept non-negative after integration steps.
 - `half_response` can be calibrated from state/bin production profiles:

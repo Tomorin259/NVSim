@@ -147,9 +147,9 @@ Metadata such as `grn_calibration` and `noise_config` is stored in the plain res
 
 Regulatory contributions can now choose which RNA state is treated as regulator activity:
 
-- `regulator_activity="spliced"`: default NVSim mode; uses current `s(t)` as the Hill-function input.
-- `regulator_activity="unspliced"`: uses current `u(t)`; closer to a SERGIO-style expression-concentration proxy.
-- `regulator_activity="total"`: uses `u(t) + s(t)` as a total-RNA proxy.
+- Recommended default: `regulator_activity="spliced"`; uses current `s(t)` as the Hill-function input.
+- For SERGIO-compatible comparison runs: `regulator_activity="unspliced"`; uses current `u(t)` as a closer expression-concentration proxy.
+- For sensitivity analysis: compare `regulator_activity="spliced"`, `"unspliced"`, and `"total"`; `total` uses `u(t) + s(t)` as a total-RNA proxy.
 
 Half-response calibration is no longer limited to a separate preprocessing step.
 If a `StateProductionProfile` is available, `simulate_linear()` and
@@ -278,9 +278,9 @@ python examples/plot_bifurcation.py
 
 Hill 调控里使用哪一种 RNA 状态作为 regulator activity 现在也是显式可配的：
 
-- `regulator_activity="spliced"`：默认模式，用当前 `s(t)` 作为 Hill 输入；
-- `regulator_activity="unspliced"`：用当前 `u(t)`，更接近 SERGIO 风格的表达浓度代理；
-- `regulator_activity="total"`：用 `u(t) + s(t)` 作为 total RNA proxy。
+- 推荐默认：`regulator_activity="spliced"`，用当前 `s(t)` 作为 Hill 输入；
+- 做 SERGIO-compatible 对照时：`regulator_activity="unspliced"`，用当前 `u(t)`，更接近 SERGIO 风格的表达浓度代理；
+- 做 sensitivity analysis 时：比较 `regulator_activity="spliced"`、`"unspliced"` 和 `"total"`；其中 `total` 用 `u(t) + s(t)` 作为 total RNA proxy。
 
 half-response calibration 也不再只能作为单独预处理步骤使用。
 如果提供了 `StateProductionProfile`，现在可以在

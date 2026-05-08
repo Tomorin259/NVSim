@@ -52,6 +52,7 @@ def _resolve_master_genes(
 
 
 def _alpha_from_state(
+    u: np.ndarray,
     s: np.ndarray,
     t: float,
     time_end: float,
@@ -63,6 +64,7 @@ def _alpha_from_state(
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
+    regulator_activity: str = "spliced",
     return_edge_contributions: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     # 根据当前 spliced 状态 s(t) 重新计算 alpha(t)。
@@ -79,8 +81,15 @@ def _alpha_from_state(
         for gene in master_genes:
             program = master_programs.get(gene, constant(default_master_alpha))
             source.loc[gene] = program.value(normalized_t)
-    # MVP 假设 regulator activity = 当前 spliced RNA s_j(t)。
-    regulator_values = pd.Series(np.maximum(s, 0.0), index=pd.Index(genes, name="gene"), dtype=float)
+    if regulator_activity == "spliced":
+        activity_values = np.maximum(s, 0.0)
+    elif regulator_activity == "unspliced":
+        activity_values = np.maximum(u, 0.0)
+    elif regulator_activity == "total":
+        activity_values = np.maximum(u, 0.0) + np.maximum(s, 0.0)
+    else:
+        raise ValueError("regulator_activity must be 'spliced', 'unspliced', or 'total'")
+    regulator_values = pd.Series(activity_values, index=pd.Index(genes, name="gene"), dtype=float)
     computed = compute_alpha(
         regulator_values,
         grn,
@@ -112,12 +121,14 @@ def _derivative(
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
+    regulator_activity: str = "spliced",
 ) -> tuple[np.ndarray, np.ndarray]:
     # y 是拼接状态向量：[u_1...u_G, s_1...s_G]。
     n_genes = len(beta)
     u = np.maximum(y[:n_genes], 0.0)
     s = np.maximum(y[n_genes:], 0.0)
     alpha = _alpha_from_state(
+        u,
         s,
         t,
         time_end,
@@ -129,6 +140,7 @@ def _derivative(
         target_leak_alpha,
         source_alpha,
         source_alpha_fn,
+        regulator_activity,
     )
     # RNA velocity 方程：du/dt -> true_velocity_u；ds/dt -> true_velocity。
     du = alpha - beta * u
@@ -151,6 +163,7 @@ def _rk4_step(
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
+    regulator_activity: str = "spliced",
 ) -> np.ndarray:
     """执行一步 RK4；每个中间状态都会重新通过 GRN 计算 alpha。"""
 
@@ -168,6 +181,7 @@ def _rk4_step(
         target_leak_alpha,
         source_alpha,
         source_alpha_fn,
+        regulator_activity,
     )
     k2, _ = _derivative(
         y + 0.5 * dt * k1,
@@ -183,6 +197,7 @@ def _rk4_step(
         target_leak_alpha,
         source_alpha,
         source_alpha_fn,
+        regulator_activity,
     )
     k3, _ = _derivative(
         y + 0.5 * dt * k2,
@@ -198,6 +213,7 @@ def _rk4_step(
         target_leak_alpha,
         source_alpha,
         source_alpha_fn,
+        regulator_activity,
     )
     k4, _ = _derivative(
         y + dt * k3,
@@ -213,6 +229,7 @@ def _rk4_step(
         target_leak_alpha,
         source_alpha,
         source_alpha_fn,
+        regulator_activity,
     )
     y_next = y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     return np.maximum(y_next, 0.0)
@@ -247,6 +264,7 @@ def _simulate_segment(
     program_time_end: float | None = None,
     source_alpha: pd.Series | None = None,
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
+    regulator_activity: str = "spliced",
     return_edge_contributions: bool = False,
 ) -> dict[str, np.ndarray]:
     """Simulate one linear segment and return timepoints x genes arrays.
@@ -279,6 +297,7 @@ def _simulate_segment(
     u[0] = np.maximum(u0, 0.0)
     s[0] = np.maximum(s0, 0.0)
     alpha0 = _alpha_from_state(
+        u[0],
         s[0],
         global_time[0],
         alpha_time_end,
@@ -290,6 +309,7 @@ def _simulate_segment(
         target_leak_alpha,
         source_alpha,
         source_alpha_fn,
+        regulator_activity,
         return_edge_contributions=return_edge_contributions,
     )
     if return_edge_contributions:
@@ -317,10 +337,12 @@ def _simulate_segment(
             target_leak_alpha,
             source_alpha,
             source_alpha_fn,
+            regulator_activity,
         )
         u[step] = y[:n_genes]
         s[step] = y[n_genes:]
         alpha_step = _alpha_from_state(
+            u[step],
             s[step],
             global_time[step],
             alpha_time_end,
@@ -332,6 +354,7 @@ def _simulate_segment(
             target_leak_alpha,
             source_alpha,
             source_alpha_fn,
+            regulator_activity,
             return_edge_contributions=return_edge_contributions,
         )
         if return_edge_contributions:
@@ -544,6 +567,7 @@ def simulate_linear(
     dropout_rate: float = 0.0,
     noise_model: str | None = None,
     capture_model: str = "scale_poisson",
+    regulator_activity: str = "spliced",
     auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
@@ -603,6 +627,7 @@ def simulate_linear(
         time_offset=0.0,
         program_time_end=time_end,
         source_alpha=source_alpha,
+        regulator_activity=regulator_activity,
         return_edge_contributions=return_edge_contributions,
     )
 
@@ -655,6 +680,7 @@ def simulate_linear(
         "capture_rate": capture_rate,
         "noise_model": noise_model if noise_model is not None else ("binomial_capture" if capture_model == "binomial" else "poisson_capture"),
         "capture_model": capture_model,
+        "regulator_activity": regulator_activity,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
         "return_edge_contributions": return_edge_contributions,
@@ -719,6 +745,7 @@ def simulate_bifurcation(
     dropout_rate: float = 0.0,
     noise_model: str | None = None,
     capture_model: str = "scale_poisson",
+    regulator_activity: str = "spliced",
     auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
@@ -801,6 +828,7 @@ def simulate_bifurcation(
         time_offset=0.0,
         program_time_end=total_program_time,
         source_alpha=trunk_source_alpha,
+        regulator_activity=regulator_activity,
         return_edge_contributions=return_edge_contributions,
     )
     # bifurcation 的关键：两个 branch 必须继承同一个 trunk terminal state。
@@ -826,6 +854,7 @@ def simulate_bifurcation(
             program_time_end=total_program_time,
             source_alpha=branch_source_alpha.get(branch),
             source_alpha_fn=branch_source_alpha_fns.get(branch),
+            regulator_activity=regulator_activity,
             return_edge_contributions=return_edge_contributions,
         )
 
@@ -919,6 +948,7 @@ def simulate_bifurcation(
         "capture_rate": capture_rate,
         "noise_model": noise_model if noise_model is not None else ("binomial_capture" if capture_model == "binomial" else "poisson_capture"),
         "capture_model": capture_model,
+        "regulator_activity": regulator_activity,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
         "return_edge_contributions": return_edge_contributions,

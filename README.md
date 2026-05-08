@@ -19,6 +19,7 @@ NVSim is intentionally smaller than SERGIO, VeloSim, dyngen, or scVelo-style pip
 - Explicit GRN input with `regulator`, `target`, `sign`, `K`, `half_response`, and `hill_coefficient`.
 - Explicit or inferred master regulators.
 - SERGIO-style additive Hill-function production rates for non-master genes.
+- Configurable regulator activity for Hill regulation: `spliced` (default), `unspliced`, or `total = u + s`.
 - State/bin-wise master-regulator production profiles.
 - Deterministic RNA velocity ODEs for unspliced and spliced RNA.
 - Separate true and observed layers.
@@ -128,6 +129,7 @@ result = simulate_linear(
     master_regulators=["g0"],
     production_profile=production,
     production_state="state_0",
+    regulator_activity="spliced",
 )
 
 print(result["layers"]["true_spliced"].shape)
@@ -142,6 +144,12 @@ Observed-count generation currently supports:
 - `binomial_capture`
 
 Metadata such as `grn_calibration` and `noise_config` is stored in the plain result dict and carried into AnnData output.
+
+Regulatory contributions can now choose which RNA state is treated as regulator activity:
+
+- `regulator_activity="spliced"`: default NVSim mode; uses current `s(t)` as the Hill-function input.
+- `regulator_activity="unspliced"`: uses current `u(t)`; closer to a SERGIO-style expression-concentration proxy.
+- `regulator_activity="total"`: uses `u(t) + s(t)` as a total-RNA proxy.
 
 Half-response calibration is no longer limited to a separate preprocessing step.
 If a `StateProductionProfile` is available, `simulate_linear()` and
@@ -180,6 +188,7 @@ GRN -> alpha(t) -> unspliced/spliced ODE -> true velocity -> snapshot cells -> o
 - 显式 GRN 输入，包含 `regulator`、`target`、`sign`、`K`、`half_response`、`hill_coefficient`。
 - 显式或自动推断的 master regulator。
 - 面向 non-master gene 的 SERGIO 风格加性 Hill 生产率模型。
+- 可配置的 regulator activity 输入：`spliced`（默认）、`unspliced` 或 `total = u + s`。
 - 按 state/bin 定义的 master regulator production profile。
 - 面向 unspliced / spliced RNA 的确定性 RNA velocity ODE。
 - true layer 与 observed layer 分离。
@@ -266,6 +275,12 @@ python examples/plot_bifurcation.py
 - `binomial_capture`
 
 同时，`grn_calibration` 和 `noise_config` 会保存在 result dict 中，并在导出 AnnData 时保留下来。
+
+Hill 调控里使用哪一种 RNA 状态作为 regulator activity 现在也是显式可配的：
+
+- `regulator_activity="spliced"`：默认模式，用当前 `s(t)` 作为 Hill 输入；
+- `regulator_activity="unspliced"`：用当前 `u(t)`，更接近 SERGIO 风格的表达浓度代理；
+- `regulator_activity="total"`：用 `u(t) + s(t)` 作为 total RNA proxy。
 
 half-response calibration 也不再只能作为单独预处理步骤使用。
 如果提供了 `StateProductionProfile`，现在可以在

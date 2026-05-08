@@ -40,7 +40,11 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - `beta_i` and `gamma_i` are gene-specific vectors.
 - Master regulators can be passed explicitly. If not, NVSim falls back to SERGIO-style master metadata when available, then to no-incoming-edge inference.
 - Master regulators inject state/bin information through externally specified production rates.
-- Non-master gene `alpha_i(t)` is recomputed from current regulator spliced expression `s_j(t)`, `K`, edge sign, `half_response`, and `hill_coefficient`.
+- Non-master gene `alpha_i(t)` is recomputed from current regulator activity, `K`, edge sign, `half_response`, and `hill_coefficient`.
+- Regulator activity is configurable:
+  - `spliced` (default): use `s_j(t)`
+  - `unspliced`: use `u_j(t)`
+  - `total`: use `u_j(t) + s_j(t)`
 - Activation contribution is `K * H_act(s_j)`.
 - Repression contribution is `K * H_rep(s_j)`, with no negative sign.
 - `target_leak_alpha` defaults to `0.0`.

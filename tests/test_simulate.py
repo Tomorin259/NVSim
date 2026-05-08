@@ -307,6 +307,50 @@ def test_result_uns_contains_grn_and_noise_metadata():
     assert result["var"]["true_gamma"].shape[0] == 4
 
 
+def test_regulator_activity_modes_change_alpha_as_expected():
+    genes = ["g0", "g1"]
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "K": [1.0],
+                "sign": ["activation"],
+                "half_response": [1.0],
+                "hill_coefficient": [1.0],
+            }
+        ),
+        genes=genes,
+    )
+    kwargs = dict(
+        n_cells=2,
+        time_end=0.1,
+        dt=0.1,
+        u0=np.array([2.0, 0.0]),
+        s0=np.array([5.0, 0.0]),
+        master_programs={"g0": 0.0},
+        seed=103,
+        poisson_observed=False,
+    )
+
+    spliced = simulate_linear(grn, regulator_activity="spliced", **kwargs)
+    unspliced = simulate_linear(grn, regulator_activity="unspliced", **kwargs)
+    total = simulate_linear(grn, regulator_activity="total", **kwargs)
+
+    assert np.isclose(spliced["layers"]["true_alpha"][0, 1], 5.0 / 6.0)
+    assert np.isclose(unspliced["layers"]["true_alpha"][0, 1], 2.0 / 3.0)
+    assert np.isclose(total["layers"]["true_alpha"][0, 1], 7.0 / 8.0)
+    assert spliced["uns"]["simulation_config"]["regulator_activity"] == "spliced"
+    assert unspliced["uns"]["simulation_config"]["regulator_activity"] == "unspliced"
+    assert total["uns"]["simulation_config"]["regulator_activity"] == "total"
+
+
+def test_invalid_regulator_activity_raises():
+    grn = _small_grn()
+    with pytest.raises(ValueError, match="regulator_activity"):
+        simulate_linear(grn, n_cells=4, time_end=0.5, dt=0.1, regulator_activity="bad_mode")
+
+
 def test_constant_alpha_linear_ode_approaches_steady_state():
     genes = ["g0"]
     grn = GRN.from_dataframe(

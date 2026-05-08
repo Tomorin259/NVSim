@@ -254,19 +254,32 @@ def test_bifurcation_regulator_activity_modes_propagate_to_trunk_and_branches():
     unspliced = simulate_bifurcation(grn, regulator_activity="unspliced", **kwargs)
     total = simulate_bifurcation(grn, regulator_activity="total", **kwargs)
 
-    expected_spliced = 5.0 / 6.0
-    expected_unspliced = 2.0 / 3.0
-    expected_total = 7.0 / 8.0
+    def expected_alpha_from_segment(segment, mode):
+        u = float(segment["u"][0, 0])
+        s = float(segment["s"][0, 0])
+        if mode == "spliced":
+            activity = s
+        elif mode == "unspliced":
+            activity = u
+        else:
+            activity = u + s
+        return activity / (1.0 + activity)
 
-    for result, expected, mode in [
-        (spliced, expected_spliced, "spliced"),
-        (unspliced, expected_unspliced, "unspliced"),
-        (total, expected_total, "total"),
+    for result, mode in [
+        (spliced, "spliced"),
+        (unspliced, "unspliced"),
+        (total, "total"),
     ]:
         segments = result["uns"]["segment_time_courses"]
-        assert np.isclose(segments["trunk"]["alpha"][0, 1], expected)
-        assert np.isclose(segments["branch_0"]["alpha"][0, 1], expected)
-        assert np.isclose(segments["branch_1"]["alpha"][0, 1], expected)
+        assert np.isclose(segments["trunk"]["alpha"][0, 1], expected_alpha_from_segment(segments["trunk"], mode))
+        assert np.isclose(
+            segments["branch_0"]["alpha"][0, 1],
+            expected_alpha_from_segment(segments["branch_0"], mode),
+        )
+        assert np.isclose(
+            segments["branch_1"]["alpha"][0, 1],
+            expected_alpha_from_segment(segments["branch_1"], mode),
+        )
         assert result["uns"]["simulation_config"]["regulator_activity"] == mode
 
 

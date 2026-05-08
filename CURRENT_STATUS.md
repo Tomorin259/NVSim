@@ -15,9 +15,7 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 - `nvsim/grn.py`: validated GRN edge schema with canonical `K`, `half_response`, and `hill_coefficient`, plus backward-compatible aliases, master-regulator detection, graph-level metadata, and explicit threshold calibration helpers.
 - `nvsim/regulation.py`: SERGIO-style additive Hill activation/repression contributions and optional edge-level contribution output.
 - `nvsim/production.py`: master-regulator forcing definitions, including time-dependent alpha programs and state/bin-wise production profiles.
-- `nvsim/kinetics.py`: beta/gamma vector creation or validation and non-negative initial `u0/s0` setup.
-- `nvsim/trajectory.py`: simple metadata builders for linear and bifurcation trajectories.
-- `nvsim/simulate.py`: RK4 ODE integration, linear simulation, bifurcation simulation, snapshot sampling, true and observed layer assembly.
+- `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, RK4 ODE integration, linear simulation, bifurcation simulation, snapshot sampling, true and observed layer assembly.
 - `nvsim/noise.py`: observed layer generation with capture scaling, optional Poisson sampling, optional VeloSim-style binomial capture, and optional dropout.
 - `nvsim/output.py`: plain dictionary output and optional AnnData export.
 - `nvsim/plotting.py`: matplotlib-only PCA/UMAP embeddings, velocity quick-look arrows, phase portraits, gene dynamics, and bifurcation representative-gene selection by alpha divergence.
@@ -25,7 +23,7 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 
 ## Repository Layout
 
-The core simulator now uses a flat nvsim/*.py layout. Noise, output, plotting, production profiles, SERGIO input parsing, and trajectory metadata live in direct modules instead of one-file package directories, which improves readability and makes grep-based inspection easier.
+The core simulator now uses a flat nvsim/*.py layout. Noise, output, plotting, production profiles, and SERGIO input parsing live in direct modules instead of one-file package directories, which improves readability and makes grep-based inspection easier. Kinetic setup now lives in `simulate.py` because it is only used by the ODE runtime path.
 
 ## Current Modeling Chain
 

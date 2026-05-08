@@ -58,13 +58,11 @@ The public API follows a flat `nvsim/*.py` layout so the core model is easy to i
 - `nvsim/grn.py`: GRN schema, master-regulator detection, graph levels, and threshold calibration helpers.
 - `nvsim/regulation.py`: SERGIO-style Hill activation/repression and additive target production.
 - `nvsim/production.py`: master-regulator forcing definitions, including time-dependent alpha programs and state/bin-wise production profiles.
-- `nvsim/kinetics.py`: beta/gamma construction and initial `u0/s0` validation.
-- `nvsim/simulate.py`: deterministic ODE integration, snapshot sampling, and result assembly.
+- `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, deterministic ODE integration, snapshot sampling, and result assembly.
 - `nvsim/noise.py`: observed-count generation for `scale_poisson` and `binomial_capture`.
 - `nvsim/output.py`: plain dict output and optional AnnData export.
 - `nvsim/plotting.py`: quick-look PCA/UMAP, phase portraits, dynamics, and gallery plots.
 - `nvsim/sergio_io.py`: SERGIO `targets/regs` parser.
-- `nvsim/trajectory.py`: linear/bifurcation trajectory metadata builders.
 
 ### Install
 
@@ -231,13 +229,11 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - `nvsim/grn.py`：GRN schema、master regulator 识别、graph level 和 threshold calibration helper。
 - `nvsim/regulation.py`：SERGIO 风格 Hill activation/repression 与加性 target production。
 - `nvsim/production.py`：master regulator forcing 定义，包括时间程序和 state/bin production profile。
-- `nvsim/kinetics.py`：`beta/gamma` 构造与 `u0/s0` 初始状态校验。
-- `nvsim/simulate.py`：确定性 ODE 积分、snapshot sampling 和结果装配。
+- `nvsim/simulate.py`：`beta/gamma` 构造、`u0/s0` 初始状态校验、确定性 ODE 积分、snapshot sampling 和结果装配。
 - `nvsim/noise.py`：`scale_poisson` 与 `binomial_capture` 两类 observed-count 生成。
 - `nvsim/output.py`：plain dict 输出和可选 AnnData 导出。
 - `nvsim/plotting.py`：PCA/UMAP、phase portrait、dynamics 和缩略图库绘图。
 - `nvsim/sergio_io.py`：SERGIO `targets/regs` 输入解析。
-- `nvsim/trajectory.py`：linear / bifurcation 轨迹 metadata 构造。
 
 ### 安装
 

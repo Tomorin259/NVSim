@@ -1,6 +1,6 @@
 """NVSim: lightweight GRN-aware RNA velocity simulation utilities."""
 
-from .config import GRNConfig, SimulationConfig, TrajectoryConfig
+from .config import GRNConfig
 
 # GRN schema and regulation.
 from .grn import (
@@ -14,10 +14,6 @@ from .grn import (
 )
 from .regulation import compute_alpha, hill_activation, hill_repression
 
-# Trajectory and kinetic utilities.
-from .kinetics import create_kinetic_vectors, initialize_state, validate_positive_vector
-from .trajectory import make_bifurcation_trajectory, make_linear_trajectory
-
 # Master-regulator forcing definitions.
 from .production import (
     AlphaProgram,
@@ -30,7 +26,7 @@ from .production import (
 )
 
 # Simulation and observed-layer generation.
-from .simulate import simulate_bifurcation, simulate_linear
+from .simulate import create_kinetic_vectors, initialize_state, simulate_bifurcation, simulate_linear, validate_positive_vector
 from .noise import generate_observed_counts
 from .output import make_result_dict, to_anndata
 
@@ -51,8 +47,6 @@ from .plotting import (
 __all__ = [
     "GRN",
     "GRNConfig",
-    "SimulationConfig",
-    "TrajectoryConfig",
     "identify_master_regulators",
     "build_graph_levels",
     "estimate_state_mean_expression",
@@ -62,8 +56,6 @@ __all__ = [
     "hill_activation",
     "hill_repression",
     "compute_alpha",
-    "make_linear_trajectory",
-    "make_bifurcation_trajectory",
     "create_kinetic_vectors",
     "initialize_state",
     "validate_positive_vector",

@@ -45,6 +45,11 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
   - `spliced` (default): use `s_j(t)`
   - `unspliced`: use `u_j(t)`
   - `total`: use `u_j(t) + s_j(t)`
+- The default `spliced` mode keeps NVSim's current biological proxy, but it is
+  not the stricter SERGIO-compatible dynamic regulator proxy.
+- For SERGIO-compatible dynamic comparison, set
+  `regulator_activity="unspliced"`.
+- `total` is intended as a total-RNA proxy for sensitivity analysis.
 - Activation contribution is `K * H_act(activity_j)`.
 - Repression contribution is `K * H_rep(activity_j)`, with no negative sign.
 - `target_leak_alpha` defaults to `0.0`.

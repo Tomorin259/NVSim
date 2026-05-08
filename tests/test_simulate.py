@@ -129,6 +129,29 @@ def test_same_seed_reproduces_sampled_cells():
     assert np.array_equal(result1["layers"]["spliced"], result2["layers"]["spliced"])
 
 
+def test_linear_sampling_without_replacement_is_default():
+    grn = _small_grn()
+    with pytest.raises(ValueError, match="n_cells exceeds available timepoints"):
+        simulate_linear(grn, n_cells=50, time_end=0.2, dt=0.1, seed=11, poisson_observed=False)
+
+
+def test_linear_sampling_replacement_can_be_enabled_and_is_recorded():
+    grn = _small_grn()
+    result = simulate_linear(
+        grn,
+        n_cells=50,
+        time_end=0.2,
+        dt=0.1,
+        seed=11,
+        poisson_observed=False,
+        allow_snapshot_replacement=True,
+    )
+    config = result["uns"]["simulation_config"]
+    assert config["sampling_replace"] is True
+    assert config["n_duplicate_snapshot_cells"] > 0
+    assert config["n_unique_timepoints_sampled"] <= 3
+
+
 def test_observed_layers_are_separate_from_true_layers():
     grn = _small_grn()
     result = simulate_linear(grn, n_cells=30, time_end=2.0, dt=0.02, seed=3, capture_rate=0.3)
@@ -160,6 +183,67 @@ def test_linear_simulation_can_use_state_production_profile():
     assert np.allclose(result["layers"]["true_alpha"][:, 0], 1.25)
     assert np.allclose(result["layers"]["true_alpha"][:, 1], 0.75)
     assert not np.allclose(result["layers"]["true_alpha"][:, 0], 99.0)
+
+
+def test_production_profile_target_conflict_raises_by_default():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "K": [0.5],
+                "sign": ["activation"],
+                "half_response": [1.0],
+                "hill_coefficient": [1.0],
+            }
+        ),
+        genes=["g0", "g1"],
+    )
+    production = StateProductionProfile(pd.DataFrame({"g1": [1.5]}, index=["bin_0"]))
+    with pytest.raises(ValueError, match="incoming regulatory edges will be ignored"):
+        simulate_linear(
+            grn,
+            n_cells=4,
+            time_end=0.4,
+            dt=0.1,
+            production_profile=production,
+            production_state="bin_0",
+            seed=7,
+            poisson_observed=False,
+        )
+
+
+def test_production_profile_target_conflict_can_be_allowed_with_metadata():
+    grn = GRN.from_dataframe(
+        pd.DataFrame(
+            {
+                "regulator": ["g0"],
+                "target": ["g1"],
+                "K": [0.5],
+                "sign": ["activation"],
+                "half_response": [1.0],
+                "hill_coefficient": [1.0],
+            }
+        ),
+        genes=["g0", "g1"],
+    )
+    production = StateProductionProfile(pd.DataFrame({"g1": [1.5]}, index=["bin_0"]))
+    with pytest.warns(UserWarning, match="incoming GRN edges"):
+        result = simulate_linear(
+            grn,
+            n_cells=4,
+            time_end=0.4,
+            dt=0.1,
+            production_profile=production,
+            production_state="bin_0",
+            allow_profile_targets_as_masters=True,
+            seed=7,
+            poisson_observed=False,
+        )
+    config = result["uns"]["simulation_config"]
+    assert config["resolved_master_regulator_source"] == "production_profile"
+    assert config["incoming_edges_to_masters_count"] == 1
+    assert config["allow_profile_targets_as_masters"] is True
 
 
 def test_linear_simulation_requires_state_for_production_profile():
@@ -305,6 +389,21 @@ def test_result_uns_contains_grn_and_noise_metadata():
     assert result["uns"]["noise_config"]["noise_model"] == "binomial_capture"
     assert result["var"]["true_beta"].shape[0] == 4
     assert result["var"]["true_gamma"].shape[0] == 4
+
+
+def test_capture_model_binomial_capture_records_canonical_noise_metadata():
+    grn = _small_grn()
+    result = simulate_linear(
+        grn,
+        n_cells=8,
+        time_end=1.0,
+        dt=0.05,
+        seed=5,
+        capture_rate=0.3,
+        capture_model="binomial_capture",
+    )
+    assert result["uns"]["simulation_config"]["noise_model"] == "binomial_capture"
+    assert result["uns"]["noise_config"]["noise_model"] == "binomial_capture"
 
 
 def test_regulator_activity_modes_change_alpha_as_expected():

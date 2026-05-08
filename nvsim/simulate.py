@@ -13,6 +13,7 @@ spliced s(t) -> true velocity。核心方程是：
 from __future__ import annotations
 
 from typing import Callable, Mapping
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -36,19 +37,71 @@ def _resolve_master_genes(
     grn: GRN,
     master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
     production_profile: StateProductionProfile | None = None,
-) -> tuple[str, ...]:
+    allow_profile_targets_as_masters: bool = False,
+) -> tuple[tuple[str, ...], dict[str, object]]:
+    explicit_provided = master_regulators is not None
+    grn_metadata_provided = grn.master_regulators is not None
     if master_regulators is not None:
         masters = tuple(str(gene) for gene in master_regulators)
+        source = "explicit"
     elif grn.master_regulators is not None:
         masters = tuple(str(gene) for gene in grn.master_regulators)
+        source = "grn_metadata"
     elif production_profile is not None:
         masters = tuple(str(gene) for gene in production_profile.genes)
+        source = "production_profile"
     else:
         masters = _infer_master_genes(grn)
+        source = "topology_inference"
     missing = sorted(set(masters) - set(grn.genes))
     if missing:
         raise ValueError(f"master regulators absent from gene list: {missing}")
-    return masters
+    incoming_to_masters = grn.edges.loc[grn.edges["target"].astype(str).isin(masters)].copy()
+    metadata = {
+        "resolved_master_regulator_source": source,
+        "incoming_edges_to_masters_count": int(incoming_to_masters.shape[0]),
+        "incoming_edges_to_masters": incoming_to_masters.to_dict(orient="records"),
+        "allow_profile_targets_as_masters": bool(allow_profile_targets_as_masters),
+    }
+    conflicting_genes = sorted(set(masters).intersection(set(grn.edges["target"].astype(str))))
+    if source == "production_profile" and conflicting_genes and not explicit_provided and not grn_metadata_provided:
+        if not allow_profile_targets_as_masters:
+            raise ValueError(
+                "Genes appearing in both production_profile and GRN targets: "
+                f"{conflicting_genes}. If these genes are treated as master regulators, "
+                "their incoming regulatory edges will be ignored. Pass explicit "
+                "master_regulators, store master_regulators in the GRN metadata, or set "
+                "allow_profile_targets_as_masters=True to accept this override explicitly."
+            )
+        warnings.warn(
+            "production_profile genes are being treated as master regulators even though they "
+            f"also have incoming GRN edges: {conflicting_genes}. Incoming regulatory edges to "
+            "those genes will be ignored.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return masters, metadata
+
+
+def _resolve_noise_model_name(noise_model: str | None, capture_model: str | None) -> str:
+    alias_map = {
+        "scale_poisson": "poisson_capture",
+        "poisson_capture": "poisson_capture",
+        "binomial": "binomial_capture",
+        "binomial_capture": "binomial_capture",
+    }
+    if noise_model is not None:
+        if noise_model not in alias_map:
+            raise ValueError(
+                "noise_model must be one of 'scale_poisson', 'poisson_capture', 'binomial', or 'binomial_capture'"
+            )
+        return alias_map[noise_model]
+    model = "scale_poisson" if capture_model is None else capture_model
+    if model not in alias_map:
+        raise ValueError(
+            "capture_model must be one of 'scale_poisson', 'poisson_capture', 'binomial', or 'binomial_capture'"
+        )
+    return alias_map[model]
 
 
 def _alpha_from_state(
@@ -382,13 +435,28 @@ def _simulate_segment(
 def _sample_snapshots(
     rng: np.random.Generator,
     n_cells: int,
-    n_timepoints: int,
-) -> np.ndarray:
+    available_indices: np.ndarray,
+    allow_snapshot_replacement: bool = False,
+) -> tuple[np.ndarray, dict[str, int | bool]]:
     if n_cells <= 0:
         raise ValueError("n_cells must be positive")
-    replace = n_cells > n_timepoints
-    sampled = rng.choice(np.arange(n_timepoints), size=n_cells, replace=replace)
-    return np.sort(sampled)
+    indices = np.asarray(available_indices, dtype=int)
+    if indices.ndim != 1 or indices.size == 0:
+        raise ValueError("available_indices must be a non-empty 1D array")
+    replace = n_cells > indices.size
+    if replace and not allow_snapshot_replacement:
+        raise ValueError(
+            "n_cells exceeds available timepoints for snapshot sampling. Increase available timepoints, "
+            "reduce dt, reduce n_cells, or set allow_snapshot_replacement=True."
+        )
+    sampled = rng.choice(indices, size=n_cells, replace=replace)
+    sampled = np.sort(sampled)
+    unique_count = int(np.unique(sampled).size)
+    return sampled, {
+        "sampling_replace": bool(replace),
+        "n_unique_timepoints_sampled": unique_count,
+        "n_duplicate_snapshot_cells": int(n_cells - unique_count),
+    }
 
 
 def _prepare_common_inputs(
@@ -504,6 +572,7 @@ def _observed_from_true(
     noise_model: str | None = None,
     capture_model: str = "scale_poisson",
 ) -> dict[str, np.ndarray]:
+    _resolve_noise_model_name(noise_model, capture_model)
     return generate_observed_counts(
         true_u,
         true_s,
@@ -544,6 +613,24 @@ def _branch_source_alpha_fn(
     return resolve
 
 
+def _branch_programs_differ(
+    base_programs: Mapping[str, AlphaProgram],
+    branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None,
+    master_genes: tuple[str, ...],
+) -> bool:
+    if branch_master_programs is None:
+        return False
+    branch0 = _merge_programs(base_programs, branch_master_programs.get("branch_0"))
+    branch1 = _merge_programs(base_programs, branch_master_programs.get("branch_1"))
+    for gene in master_genes:
+        program0 = branch0.get(gene, constant(0.0))
+        program1 = branch1.get(gene, constant(0.0))
+        for t in (0.0, 0.5, 1.0):
+            if not np.isclose(program0.value(t), program1.value(t)):
+                return True
+    return False
+
+
 def simulate_linear(
     grn: GRN,
     n_cells: int = 100,
@@ -571,6 +658,8 @@ def simulate_linear(
     auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
+    allow_profile_targets_as_masters: bool = False,
+    allow_snapshot_replacement: bool = False,
 ) -> dict:
     """Simulate a linear GRN-aware RNA velocity trajectory.
 
@@ -593,7 +682,12 @@ def simulate_linear(
         s0_arr,
         programs,
     ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
-    master_genes = _resolve_master_genes(grn, master_regulators=master_regulators, production_profile=production_profile)
+    master_genes, master_metadata = _resolve_master_genes(
+        grn,
+        master_regulators=master_regulators,
+        production_profile=production_profile,
+        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
+    )
     source_alpha = None
     if production_profile is not None:
         if production_state is None:
@@ -633,12 +727,18 @@ def simulate_linear(
 
     # snapshot sampling：先模拟连续时间过程，再抽样为离散细胞。
     rng = np.random.default_rng(seed)
-    sampled_idx = _sample_snapshots(rng, n_cells, segment["u"].shape[0])
+    sampled_idx, sampling_metadata = _sample_snapshots(
+        rng,
+        n_cells,
+        np.arange(segment["u"].shape[0]),
+        allow_snapshot_replacement=allow_snapshot_replacement,
+    )
     true_u = segment["u"][sampled_idx]
     true_s = segment["s"][sampled_idx]
     true_v = segment["velocity"][sampled_idx]
     true_velocity_u = segment["true_velocity_u"][sampled_idx]
     true_alpha = segment["alpha"][sampled_idx]
+    resolved_noise_model = _resolve_noise_model_name(noise_model, capture_model)
     observed = _observed_from_true(
         true_u,
         true_s,
@@ -657,10 +757,19 @@ def simulate_linear(
             "local_time": segment["local_time"][sampled_idx],
             "branch": "linear",
             "time_index": sampled_idx,
+            "segment_time_index": sampled_idx,
+            "global_time_index": sampled_idx,
         },
         index=[f"cell_{i}" for i in range(n_cells)],
     )
-    time_grid = pd.DataFrame({"time": segment["pseudotime"], "local_time": segment["local_time"], "branch": "linear"})
+    time_grid = pd.DataFrame(
+        {
+            "time": segment["pseudotime"],
+            "local_time": segment["local_time"],
+            "branch": "linear",
+            "global_time_index": np.arange(segment["u"].shape[0]),
+        }
+    )
     config = {
         "model": "linear_ode_mvp",
         "time_end": time_end,
@@ -673,17 +782,25 @@ def simulate_linear(
         "alpha_max": alpha_max,
         "default_master_alpha": default_master_alpha,
         "explicit_master_regulators": list(master_genes),
+        "resolved_master_regulator_source": master_metadata["resolved_master_regulator_source"],
+        "incoming_edges_to_masters_count": master_metadata["incoming_edges_to_masters_count"],
+        "incoming_edges_to_masters": master_metadata["incoming_edges_to_masters"],
+        "allow_profile_targets_as_masters": allow_profile_targets_as_masters,
         "production_profile": production_profile is not None,
         "production_state": production_state,
         "auto_calibrate_half_response": auto_calibrate_half_response,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
-        "noise_model": noise_model if noise_model is not None else ("binomial_capture" if capture_model == "binomial" else "poisson_capture"),
+        "noise_model": resolved_noise_model,
         "capture_model": capture_model,
         "regulator_activity": regulator_activity,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
         "return_edge_contributions": return_edge_contributions,
+        "sampling_replace": sampling_metadata["sampling_replace"],
+        "n_unique_timepoints_sampled": sampling_metadata["n_unique_timepoints_sampled"],
+        "n_duplicate_snapshot_cells": sampling_metadata["n_duplicate_snapshot_cells"],
+        "time_index_scope": "segment_local",
     }
     noise_config = {
         "noise_model": config["noise_model"],
@@ -749,6 +866,9 @@ def simulate_bifurcation(
     auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
+    allow_profile_targets_as_masters: bool = False,
+    include_branch_initial_state: bool = False,
+    allow_snapshot_replacement: bool = False,
 ) -> dict:
     """Simulate a trunk-to-two-branch RNA velocity trajectory.
 
@@ -774,7 +894,12 @@ def simulate_bifurcation(
         s0_arr,
         programs,
     ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
-    master_genes = _resolve_master_genes(grn, master_regulators=master_regulators, production_profile=production_profile)
+    master_genes, master_metadata = _resolve_master_genes(
+        grn,
+        master_regulators=master_regulators,
+        production_profile=production_profile,
+        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
+    )
     trunk_source_alpha = None
     branch_source_alpha: dict[str, pd.Series] = {}
     branch_source_alpha_fns: dict[str, Callable[[float], pd.Series]] = {}
@@ -812,6 +937,22 @@ def simulate_bifurcation(
                 branch_source_alpha[branch] = production_profile.source_alpha(branch_production_states[branch], genes=grn.genes)
 
     total_program_time = trunk_time + branch_time
+    branch_divergence_source = "none"
+    branch_divergence_configured = False
+    if production_profile is not None and branch_production_states is not None:
+        if branch_production_states.get("branch_0") != branch_production_states.get("branch_1"):
+            branch_divergence_source = "production_profile"
+            branch_divergence_configured = True
+    if _branch_programs_differ(programs, branch_master_programs, master_genes):
+        branch_divergence_source = "branch_master_programs"
+        branch_divergence_configured = True
+    if not branch_divergence_configured:
+        warnings.warn(
+            "Branches share identical dynamics; this is a duplicated-branch control, not a true bifurcation.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     trunk = _simulate_segment(
         grn=grn,
         master_genes=master_genes,
@@ -860,12 +1001,32 @@ def simulate_bifurcation(
 
     rng = np.random.default_rng(seed)
     sampled_segments: list[tuple[str, dict[str, np.ndarray], np.ndarray]] = []
-    trunk_idx = _sample_snapshots(rng, n_trunk_cells, trunk["u"].shape[0])
+    trunk_idx, trunk_sampling = _sample_snapshots(
+        rng,
+        n_trunk_cells,
+        np.arange(trunk["u"].shape[0]),
+        allow_snapshot_replacement=allow_snapshot_replacement,
+    )
     sampled_segments.append(("trunk", trunk, trunk_idx))
+    sampling_summary: dict[str, dict[str, int | bool]] = {"trunk": trunk_sampling}
     for branch in branch_labels:
         count = n_branch_cells[branch] if isinstance(n_branch_cells, Mapping) else n_branch_cells
-        branch_idx = _sample_snapshots(rng, int(count), branch_segments[branch]["u"].shape[0])
+        available_branch_indices = np.arange(branch_segments[branch]["u"].shape[0])
+        if not include_branch_initial_state:
+            available_branch_indices = available_branch_indices[available_branch_indices != 0]
+            if available_branch_indices.size == 0:
+                raise ValueError(
+                    f"branch {branch} has no sampleable timepoints after excluding the inherited initial state; "
+                    "increase branch_time / reduce dt, or set include_branch_initial_state=True."
+                )
+        branch_idx, branch_sampling = _sample_snapshots(
+            rng,
+            int(count),
+            available_branch_indices,
+            allow_snapshot_replacement=allow_snapshot_replacement,
+        )
         sampled_segments.append((branch, branch_segments[branch], branch_idx))
+        sampling_summary[branch] = branch_sampling
 
     # 按 trunk, branch_0, branch_1 拼接，保证 layers 与 obs 行顺序一致。
     true_u = np.concatenate([segment["u"][idx] for _, segment, idx in sampled_segments], axis=0)
@@ -885,10 +1046,16 @@ def simulate_bifurcation(
         capture_model=capture_model,
     )
 
+    trunk_global = np.arange(trunk["u"].shape[0], dtype=int)
+    branch0_global = np.arange(trunk_global[-1] + 1, trunk_global[-1] + 1 + branch_segments["branch_0"]["u"].shape[0], dtype=int)
+    branch1_global = np.arange(branch0_global[-1] + 1, branch0_global[-1] + 1 + branch_segments["branch_1"]["u"].shape[0], dtype=int)
+    global_index_map = {"trunk": trunk_global, "branch_0": branch0_global, "branch_1": branch1_global}
+
     obs_frames = []
     offset = 0
     for branch, segment, idx in sampled_segments:
         n = len(idx)
+        global_idx = global_index_map[branch][idx]
         obs_frames.append(
             pd.DataFrame(
                 {
@@ -896,6 +1063,8 @@ def simulate_bifurcation(
                     "local_time": segment["local_time"][idx],
                     "branch": branch,
                     "segment": branch,
+                    "segment_time_index": idx,
+                    "global_time_index": global_idx,
                     "time_index": idx,
                 },
                 index=[f"cell_{i}" for i in range(offset, offset + n)],
@@ -906,13 +1075,21 @@ def simulate_bifurcation(
 
     time_grid = pd.concat(
         [
-            pd.DataFrame({"pseudotime": trunk["pseudotime"], "local_time": trunk["local_time"], "branch": "trunk"}),
+            pd.DataFrame(
+                {
+                    "pseudotime": trunk["pseudotime"],
+                    "local_time": trunk["local_time"],
+                    "branch": "trunk",
+                    "global_time_index": trunk_global,
+                }
+            ),
             *[
                 pd.DataFrame(
                     {
                         "pseudotime": branch_segments[branch]["pseudotime"],
                         "local_time": branch_segments[branch]["local_time"],
                         "branch": branch,
+                        "global_time_index": global_index_map[branch],
                     }
                 )
                 for branch in branch_labels
@@ -938,20 +1115,32 @@ def simulate_bifurcation(
         "alpha_max": alpha_max,
         "default_master_alpha": default_master_alpha,
         "explicit_master_regulators": list(master_genes),
+        "resolved_master_regulator_source": master_metadata["resolved_master_regulator_source"],
+        "incoming_edges_to_masters_count": master_metadata["incoming_edges_to_masters_count"],
+        "incoming_edges_to_masters": master_metadata["incoming_edges_to_masters"],
+        "allow_profile_targets_as_masters": allow_profile_targets_as_masters,
         "production_profile": production_profile is not None,
         "trunk_production_state": trunk_production_state,
         "branch_production_states": dict(branch_production_states) if branch_production_states is not None else None,
         "interpolate_production": interpolate_production,
         "auto_calibrate_half_response": auto_calibrate_half_response,
         "branch_master_programs_enabled": branch_master_programs is not None,
+        "branch_divergence_configured": branch_divergence_configured,
+        "branch_divergence_source": branch_divergence_source,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
-        "noise_model": noise_model if noise_model is not None else ("binomial_capture" if capture_model == "binomial" else "poisson_capture"),
+        "noise_model": _resolve_noise_model_name(noise_model, capture_model),
         "capture_model": capture_model,
         "regulator_activity": regulator_activity,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
         "return_edge_contributions": return_edge_contributions,
+        "include_branch_initial_state": include_branch_initial_state,
+        "sampling_replace": any(item["sampling_replace"] for item in sampling_summary.values()),
+        "n_unique_timepoints_sampled": int(sum(item["n_unique_timepoints_sampled"] for item in sampling_summary.values())),
+        "n_duplicate_snapshot_cells": int(sum(item["n_duplicate_snapshot_cells"] for item in sampling_summary.values())),
+        "sampling_summary": sampling_summary,
+        "time_index_scope": "segment_local",
     }
     noise_config = {
         "noise_model": config["noise_model"],

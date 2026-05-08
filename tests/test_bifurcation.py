@@ -81,11 +81,20 @@ def test_bifurcation_output_shapes_and_obs_alignment():
     n_genes = 4
     for layer in result["layers"].values():
         assert layer.shape == (n_cells, n_genes)
-    assert list(result["obs"].columns) == ["pseudotime", "local_time", "branch", "segment", "time_index"]
+    assert list(result["obs"].columns) == [
+        "pseudotime",
+        "local_time",
+        "branch",
+        "segment",
+        "segment_time_index",
+        "global_time_index",
+        "time_index",
+    ]
     assert result["obs"].shape[0] == n_cells
     assert list(result["obs"]["branch"].unique()) == ["trunk", "branch_0", "branch_1"]
     assert (result["obs"].loc[result["obs"]["branch"] == "trunk", "pseudotime"] <= 1.0).all()
     assert (result["obs"].loc[result["obs"]["branch"] != "trunk", "local_time"] >= 0.0).all()
+    assert result["uns"]["simulation_config"]["time_index_scope"] == "segment_local"
 
 
 def test_bifurcation_true_velocity_matches_formula():
@@ -105,6 +114,54 @@ def test_bifurcation_seed_is_reproducible():
     assert np.array_equal(result1["obs"]["time_index"].to_numpy(), result2["obs"]["time_index"].to_numpy())
     assert np.allclose(result1["layers"]["true_spliced"], result2["layers"]["true_spliced"])
     assert np.array_equal(result1["layers"]["spliced"], result2["layers"]["spliced"])
+
+
+def test_bifurcation_branch_initial_state_is_excluded_by_default():
+    result = _result(seed=31)
+    branch_obs = result["obs"].loc[result["obs"]["branch"] != "trunk"]
+    assert (branch_obs["segment_time_index"] > 0).all()
+    assert result["uns"]["simulation_config"]["include_branch_initial_state"] is False
+
+
+def test_bifurcation_can_include_branch_initial_state_when_requested():
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=4,
+        n_branch_cells={"branch_0": 4, "branch_1": 4},
+        trunk_time=0.4,
+        branch_time=0.4,
+        dt=0.2,
+        include_branch_initial_state=True,
+        seed=17,
+        poisson_observed=False,
+        allow_snapshot_replacement=True,
+    )
+    branch_obs = result["obs"].loc[result["obs"]["branch"] != "trunk"]
+    assert (branch_obs["segment_time_index"] == 0).any()
+    assert result["uns"]["simulation_config"]["include_branch_initial_state"] is True
+
+
+def test_bifurcation_global_time_index_maps_to_time_grid():
+    result = _result(seed=31)
+    obs = result["obs"]
+    grid = result["time_grid"].copy().set_index("global_time_index")
+    sample = obs.iloc[0]
+    mapped = grid.loc[int(sample["global_time_index"])]
+    assert np.isclose(mapped["pseudotime"], sample["pseudotime"])
+    assert np.isclose(mapped["local_time"], sample["local_time"])
+    assert mapped["branch"] == sample["branch"]
+
+
+def test_bifurcation_segment_time_index_can_repeat_but_global_time_index_need_not_match():
+    result = _result(seed=31)
+    obs = result["obs"]
+    branch0 = obs.loc[obs["branch"] == "branch_0", "segment_time_index"]
+    branch1 = obs.loc[obs["branch"] == "branch_1", "segment_time_index"]
+    overlap = set(branch0.tolist()).intersection(set(branch1.tolist()))
+    assert overlap
+    branch0_global = set(obs.loc[obs["branch"] == "branch_0", "global_time_index"].tolist())
+    branch1_global = set(obs.loc[obs["branch"] == "branch_1", "global_time_index"].tolist())
+    assert branch0_global.isdisjoint(branch1_global)
 
 
 def test_bifurcation_can_use_state_production_profile():
@@ -237,7 +294,7 @@ def test_bifurcation_regulator_activity_modes_propagate_to_trunk_and_branches():
     )
     kwargs = dict(
         n_trunk_cells=2,
-        n_branch_cells={"branch_0": 2, "branch_1": 2},
+        n_branch_cells={"branch_0": 1, "branch_1": 1},
         trunk_time=0.1,
         branch_time=0.1,
         dt=0.1,
@@ -317,3 +374,67 @@ def test_bifurcation_output_contains_standardized_metadata():
         result["uns"].keys()
     )
     assert result["uns"]["noise_config"]["noise_model"] == "poisson_capture"
+
+
+def test_bifurcation_capture_model_binomial_capture_records_canonical_noise_metadata():
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=5,
+        n_branch_cells={"branch_0": 5, "branch_1": 5},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        seed=53,
+        capture_rate=0.4,
+        capture_model="binomial_capture",
+    )
+    assert result["uns"]["simulation_config"]["noise_model"] == "binomial_capture"
+    assert result["uns"]["noise_config"]["noise_model"] == "binomial_capture"
+
+
+def test_bifurcation_without_branch_specific_difference_is_recorded_as_control():
+    with pytest.warns(UserWarning, match="duplicated-branch control"):
+        result = simulate_bifurcation(
+            _small_grn(),
+            n_trunk_cells=5,
+            n_branch_cells={"branch_0": 5, "branch_1": 5},
+            trunk_time=0.8,
+            branch_time=0.8,
+            dt=0.04,
+            seed=53,
+            poisson_observed=False,
+        )
+    config = result["uns"]["simulation_config"]
+    assert config["branch_divergence_configured"] is False
+    assert config["branch_divergence_source"] == "none"
+
+
+def test_bifurcation_sampling_without_replacement_is_default():
+    with pytest.raises(ValueError, match="n_cells exceeds available timepoints"):
+        simulate_bifurcation(
+            _small_grn(),
+            n_trunk_cells=50,
+            n_branch_cells={"branch_0": 50, "branch_1": 50},
+            trunk_time=0.2,
+            branch_time=0.2,
+            dt=0.1,
+            seed=11,
+            poisson_observed=False,
+        )
+
+
+def test_bifurcation_sampling_replacement_can_be_enabled_and_is_recorded():
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=50,
+        n_branch_cells={"branch_0": 50, "branch_1": 50},
+        trunk_time=0.2,
+        branch_time=0.2,
+        dt=0.1,
+        seed=11,
+        poisson_observed=False,
+        allow_snapshot_replacement=True,
+    )
+    config = result["uns"]["simulation_config"]
+    assert config["sampling_replace"] is True
+    assert config["n_duplicate_snapshot_cells"] > 0

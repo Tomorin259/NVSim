@@ -13,6 +13,27 @@ from __future__ import annotations
 import numpy as np
 
 
+def _resolve_noise_model_name(noise_model: str | None, capture_model: str | None) -> str:
+    alias_map = {
+        "scale_poisson": "poisson_capture",
+        "poisson_capture": "poisson_capture",
+        "binomial": "binomial_capture",
+        "binomial_capture": "binomial_capture",
+    }
+    if noise_model is not None:
+        if noise_model not in alias_map:
+            raise ValueError(
+                "noise_model must be one of 'scale_poisson', 'poisson_capture', 'binomial', or 'binomial_capture'"
+            )
+        return alias_map[noise_model]
+    model = "scale_poisson" if capture_model is None else capture_model
+    if model not in alias_map:
+        raise ValueError(
+            "capture_model must be one of 'scale_poisson', 'poisson_capture', 'binomial', or 'binomial_capture'"
+        )
+    return alias_map[model]
+
+
 def generate_observed_counts(
     true_unspliced: object,
     true_spliced: object,
@@ -49,26 +70,16 @@ def generate_observed_counts(
     if (u < 0).any() or (s < 0).any():
         raise ValueError("true values must be non-negative")
 
-    alias_map = {
-        "scale_poisson": "poisson_capture",
-        "binomial": "binomial_capture",
-        "poisson_capture": "poisson_capture",
-        "binomial_capture": "binomial_capture",
-    }
-    if noise_model is None:
-        if capture_model not in alias_map:
-            raise ValueError(
-                "capture_model must be 'scale_poisson' or 'binomial', or use "
-                "noise_model='poisson_capture'/'binomial_capture'"
-            )
-        resolved_noise_model = alias_map[capture_model]
-    else:
-        if noise_model not in {"poisson_capture", "binomial_capture"}:
-            raise ValueError("noise_model must be 'poisson_capture' or 'binomial_capture'")
-        resolved_noise_model = noise_model
+    resolved_noise_model = _resolve_noise_model_name(noise_model, capture_model)
 
-    if capture_rate is not None and (capture_rate < 0 or capture_rate > 1):
-        raise ValueError("capture_rate must be in [0, 1]")
+    if dropout_rate < 0 or dropout_rate > 1:
+        raise ValueError("dropout_rate must be in [0, 1]")
+    if capture_rate is not None:
+        capture_rate_arr = np.asarray(capture_rate, dtype=float)
+        if not np.isfinite(capture_rate_arr).all():
+            raise ValueError("capture_rate must be finite")
+        if ((capture_rate_arr < 0) | (capture_rate_arr > 1)).any():
+            raise ValueError("capture_rate must be in [0, 1]")
 
     if resolved_noise_model == "binomial_capture":
         if capture_rate is None:
@@ -88,8 +99,6 @@ def generate_observed_counts(
             observed_s = s.copy()
 
     if dropout_rate:
-        if dropout_rate < 0 or dropout_rate > 1:
-            raise ValueError("dropout_rate must be in [0, 1]")
         keep_u = rng.binomial(1, 1.0 - dropout_rate, size=observed_u.shape)
         keep_s = rng.binomial(1, 1.0 - dropout_rate, size=observed_s.shape)
         observed_u *= keep_u

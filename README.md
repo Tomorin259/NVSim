@@ -145,10 +145,14 @@ Observed-count generation currently supports:
 
 Metadata such as `grn_calibration` and `noise_config` is stored in the plain result dict and carried into AnnData output.
 
-Regulatory contributions can now choose which RNA state is treated as regulator activity:
+NVSim uses SERGIO-style additive Hill regulation, but the default
+`regulator_activity="spliced"` is not the strict SERGIO-compatible dynamic
+regulator proxy.
 
-- Recommended default: `regulator_activity="spliced"`; uses current `s(t)` as the Hill-function input.
-- For SERGIO-compatible comparison runs: `regulator_activity="unspliced"`; uses current `u(t)` as a closer expression-concentration proxy.
+Regulatory contributions can choose which RNA state is treated as regulator activity:
+
+- Recommended default: `regulator_activity="spliced"`; uses current `s(t)` as a mature-mRNA / downstream biological proxy.
+- For SERGIO-compatible dynamic comparison runs: `regulator_activity="unspliced"`; uses current `u(t)` as a closer expression-concentration proxy.
 - For sensitivity analysis: compare `regulator_activity="spliced"`, `"unspliced"`, and `"total"`; `total` uses `u(t) + s(t)` as a total-RNA proxy.
 
 Half-response calibration is no longer limited to a separate preprocessing step.
@@ -188,7 +192,7 @@ GRN -> alpha(t) -> unspliced/spliced ODE -> true velocity -> snapshot cells -> o
 - 显式 GRN 输入，包含 `regulator`、`target`、`sign`、`K`、`half_response`、`hill_coefficient`。
 - 显式或自动推断的 master regulator。
 - 面向 non-master gene 的 SERGIO 风格加性 Hill 生产率模型。
-- 可配置的 regulator activity 输入：`spliced`（默认）、`unspliced` 或 `total = u + s`。
+- 可配置的 regulator activity 调控活性代理：`spliced`（默认）、`unspliced` 或 `total = u + s`。
 - 按 state/bin 定义的 master regulator production profile。
 - 面向 unspliced / spliced RNA 的确定性 RNA velocity ODE。
 - true layer 与 observed layer 分离。
@@ -276,10 +280,14 @@ python examples/plot_bifurcation.py
 
 同时，`grn_calibration` 和 `noise_config` 会保存在 result dict 中，并在导出 AnnData 时保留下来。
 
+当前仍然是 SERGIO 风格的加性 Hill regulation，但默认的
+`regulator_activity="spliced"` 并不是严格的 SERGIO-compatible dynamic
+regulator proxy。
+
 Hill 调控里使用哪一种 RNA 状态作为 regulator activity 现在也是显式可配的：
 
-- 推荐默认：`regulator_activity="spliced"`，用当前 `s(t)` 作为 Hill 输入；
-- 做 SERGIO-compatible 对照时：`regulator_activity="unspliced"`，用当前 `u(t)`，更接近 SERGIO 风格的表达浓度代理；
+- 推荐默认：`regulator_activity="spliced"`，用当前 `s(t)` 作为 mature mRNA / downstream proxy；
+- 做 SERGIO-compatible dynamic 对照时：`regulator_activity="unspliced"`，用当前 `u(t)`，更接近 SERGIO 风格的表达浓度代理；
 - 做 sensitivity analysis 时：比较 `regulator_activity="spliced"`、`"unspliced"` 和 `"total"`；其中 `total` 用 `u(t) + s(t)` 作为 total RNA proxy。
 
 half-response calibration 也不再只能作为单独预处理步骤使用。

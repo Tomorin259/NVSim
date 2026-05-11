@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from nvsim.production import StateProductionProfile
+from nvsim.production import StateProductionProfile, transition_weight
 
 
 def _profile():
@@ -40,6 +40,23 @@ def test_state_production_profile_interpolates_between_states():
     alpha = profile.source_alpha_interpolated("bin_0", "bin_1", 0.25)
 
     assert alpha.to_dict() == {"g0": 0.75, "g2": 2.5}
+
+
+def test_state_production_profile_transition_schedules():
+    profile = _profile()
+
+    assert transition_weight(0.25, schedule="step", midpoint=0.5) == 0.0
+    assert transition_weight(0.75, schedule="step", midpoint=0.5) == 1.0
+    assert transition_weight(0.25, schedule="linear") == 0.25
+
+    start = profile.source_alpha_transition("bin_0", "bin_1", 0.0, schedule="sigmoid")
+    middle = profile.source_alpha_transition("bin_0", "bin_1", 0.5, schedule="sigmoid")
+    end = profile.source_alpha_transition("bin_0", "bin_1", 1.0, schedule="sigmoid")
+
+    assert start.to_dict() == {"g0": 0.5, "g2": 2.0}
+    assert end.to_dict() == {"g0": 1.5, "g2": 4.0}
+    assert 0.5 < middle["g0"] < 1.5
+    assert 2.0 < middle["g2"] < 4.0
 
 
 def test_state_production_profile_validates_master_genes():

@@ -11,6 +11,8 @@ These are the supported public example workflows.
 
 - `run_mvp_linear.py`: builds a 20-gene linear GRN-aware RNA velocity dataset.
 - `run_mvp_bifurcation.py`: builds a trunk-to-two-branch dataset with inherited branch initial states.
+- `run_linear_continuous_program.py`: demonstrates the original `continuous_program` master-regulator alpha mode.
+- `run_bifurcation_state_anchor.py`: demonstrates SERGIO-style `state_anchor` master-regulator production anchors with smooth branch transitions.
 
 ### Plotting
 
@@ -24,6 +26,8 @@ python examples/run_mvp_linear.py
 python examples/plot_linear.py
 python examples/run_mvp_bifurcation.py
 python examples/plot_bifurcation.py
+python examples/run_linear_continuous_program.py
+python examples/run_bifurcation_state_anchor.py
 ```
 
 ## Output Naming
@@ -32,6 +36,8 @@ Current generated output groups are:
 
 - `outputs/linear_20gene/`: small linear MVP sanity dataset.
 - `outputs/bifurcation_20gene_3master/`: small hand-built GRN bifurcation dataset.
+- `outputs/linear_continuous_program/`: continuous master alpha program example.
+- `outputs/bifurcation_state_anchor/`: SERGIO-style state-anchor bifurcation example.
 
 ## Notes on SERGIO-derived Workflows
 

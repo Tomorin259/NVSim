@@ -233,6 +233,63 @@ def test_bifurcation_interpolation_is_optional_not_default():
     assert not np.allclose(segments["branch_0"]["alpha"][0], segments["branch_0"]["alpha"][-1])
 
 
+def test_bifurcation_state_anchor_transitions_to_child_states_and_inherits_trunk():
+    production = StateProductionProfile(
+        pd.DataFrame(
+            {
+                "g0": [0.4, 1.4, 0.1],
+                "g1": [0.5, 0.2, 1.5],
+            },
+            index=["progenitor", "lineage_A", "lineage_B"],
+        )
+    )
+
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=6,
+        n_branch_cells={"branch_0": 6, "branch_1": 6},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        production_profile=production,
+        trunk_state="progenitor",
+        branch_child_states=("lineage_A", "lineage_B"),
+        alpha_source_mode="state_anchor",
+        transition_schedule="sigmoid",
+        seed=43,
+        poisson_observed=False,
+    )
+
+    segments = result["uns"]["segment_time_courses"]
+    inheritance = result["uns"]["branch_inheritance"]
+    assert np.allclose(inheritance["branch_0_initial_u"], inheritance["trunk_terminal_u"])
+    assert np.allclose(inheritance["branch_1_initial_s"], inheritance["trunk_terminal_s"])
+    assert np.isclose(segments["branch_0"]["alpha"][0, 0], 0.4)
+    assert np.isclose(segments["branch_0"]["alpha"][-1, 0], 1.4)
+    assert np.isclose(segments["branch_1"]["alpha"][0, 1], 0.5)
+    assert np.isclose(segments["branch_1"]["alpha"][-1, 1], 1.5)
+    config = result["uns"]["simulation_config"]
+    assert config["alpha_source_mode"] == "state_anchor"
+    assert config["trunk_state"] == "progenitor"
+    assert config["branch_child_states"] == {"branch_0": "lineage_A", "branch_1": "lineage_B"}
+    assert config["transition_schedule"] == "sigmoid"
+    assert config["branch_divergence_configured"] is True
+    assert config["branch_divergence_source"] == "state_anchor"
+
+
+def test_bifurcation_state_anchor_requires_existing_states():
+    production = StateProductionProfile(pd.DataFrame({"g0": [0.4], "g1": [0.5]}, index=["progenitor"]))
+
+    with pytest.raises(ValueError, match="unknown production state"):
+        simulate_bifurcation(
+            _small_grn(),
+            production_profile=production,
+            trunk_state="progenitor",
+            branch_child_states=("missing_A", "missing_B"),
+            alpha_source_mode="state_anchor",
+        )
+
+
 def test_bifurcation_requires_known_production_states():
     production = StateProductionProfile(pd.DataFrame({"g0": [0.4], "g1": [0.5]}, index=["trunk_state"]))
 

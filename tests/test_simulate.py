@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from nvsim.grn import GRN
-from nvsim.production import StateProductionProfile
+from nvsim.production import StateProductionProfile, linear_increase
 from nvsim.simulate import simulate_linear
 
 
@@ -183,6 +183,95 @@ def test_linear_simulation_can_use_state_production_profile():
     assert np.allclose(result["layers"]["true_alpha"][:, 0], 1.25)
     assert np.allclose(result["layers"]["true_alpha"][:, 1], 0.75)
     assert not np.allclose(result["layers"]["true_alpha"][:, 0], 99.0)
+
+
+def test_continuous_program_mode_keeps_time_program_behavior():
+    grn = _small_grn()
+    result = simulate_linear(
+        grn,
+        n_cells=5,
+        time_end=1.0,
+        dt=0.25,
+        master_programs={"g0": linear_increase(0.2, 1.2), "g1": 0.5},
+        alpha_source_mode="continuous_program",
+        seed=17,
+        poisson_observed=False,
+    )
+
+    assert result["uns"]["simulation_config"]["alpha_source_mode"] == "continuous_program"
+    assert np.isclose(result["layers"]["true_alpha"][0, 0], 0.2)
+    assert np.isclose(result["layers"]["true_alpha"][-1, 0], 1.2)
+    assert result["uns"]["simulation_config"]["master_programs"]["g0"]["kind"] == "linear_increase"
+
+
+def test_state_anchor_static_state_sets_master_alpha():
+    grn = _small_grn()
+    production = StateProductionProfile(pd.DataFrame({"g0": [1.25], "g1": [0.75]}, index=["progenitor"]))
+    result = simulate_linear(
+        grn,
+        n_cells=5,
+        time_end=1.0,
+        dt=0.25,
+        production_profile=production,
+        production_state="progenitor",
+        alpha_source_mode="state_anchor",
+        seed=17,
+        poisson_observed=False,
+    )
+
+    assert result["uns"]["simulation_config"]["alpha_source_mode"] == "state_anchor"
+    assert result["uns"]["simulation_config"]["production_profile_states"] == ["progenitor"]
+    assert np.allclose(result["layers"]["true_alpha"][:, 0], 1.25)
+    assert np.allclose(result["layers"]["true_alpha"][:, 1], 0.75)
+
+
+def test_state_anchor_linear_transition_interpolates_master_alpha():
+    grn = _small_grn()
+    production = StateProductionProfile(
+        pd.DataFrame({"g0": [0.2, 1.2], "g1": [1.0, 0.5]}, index=["progenitor", "lineage_A"])
+    )
+    result = simulate_linear(
+        grn,
+        n_cells=5,
+        time_end=1.0,
+        dt=0.25,
+        production_profile=production,
+        parent_state="progenitor",
+        child_state="lineage_A",
+        transition_schedule="linear",
+        seed=17,
+        poisson_observed=False,
+    )
+
+    alpha_g0 = result["layers"]["true_alpha"][:, 0]
+    assert result["uns"]["simulation_config"]["alpha_source_mode"] == "state_anchor"
+    assert np.isclose(alpha_g0[0], 0.2)
+    assert np.isclose(alpha_g0[2], 0.7)
+    assert np.isclose(alpha_g0[-1], 1.2)
+
+
+def test_state_anchor_sigmoid_transition_is_monotonic():
+    grn = _small_grn()
+    production = StateProductionProfile(
+        pd.DataFrame({"g0": [0.2, 1.2], "g1": [1.0, 0.5]}, index=["progenitor", "lineage_A"])
+    )
+    result = simulate_linear(
+        grn,
+        n_cells=9,
+        time_end=1.0,
+        dt=0.125,
+        production_profile=production,
+        parent_state="progenitor",
+        child_state="lineage_A",
+        transition_schedule="sigmoid",
+        seed=17,
+        poisson_observed=False,
+    )
+
+    alpha_g0 = result["layers"]["true_alpha"][:, 0]
+    assert np.isclose(alpha_g0[0], 0.2)
+    assert np.isclose(alpha_g0[-1], 1.2)
+    assert np.all(np.diff(alpha_g0) >= -1e-9)
 
 
 def test_production_profile_target_conflict_raises_by_default():

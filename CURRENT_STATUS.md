@@ -14,7 +14,7 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 
 - `nvsim/grn.py`: validated GRN edge schema with canonical `K`, `half_response`, and `hill_coefficient`, plus backward-compatible aliases, master-regulator detection, graph-level metadata, and explicit threshold calibration helpers.
 - `nvsim/regulation.py`: SERGIO-style additive Hill activation/repression contributions and optional edge-level contribution output.
-- `nvsim/production.py`: master-regulator forcing definitions, including time-dependent alpha programs and state/bin-wise production profiles.
+- `nvsim/production.py`: master-regulator forcing definitions, including continuous alpha programs, SERGIO-style state/bin production anchors, and parent-to-child transition schedules.
 - `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, RK4 ODE integration, linear simulation, bifurcation simulation, snapshot sampling, true and observed layer assembly.
 - `nvsim/noise.py`: observed layer generation with capture scaling, optional Poisson sampling, optional VeloSim-style binomial capture, and optional dropout.
 - `nvsim/output.py`: plain dictionary output and optional AnnData export.
@@ -37,7 +37,9 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 
 - `beta_i` and `gamma_i` are gene-specific vectors.
 - Master regulators can be passed explicitly. If not, NVSim falls back to SERGIO-style master metadata when available, then to no-incoming-edge inference.
-- Master regulators inject state/bin information through externally specified production rates.
+- Master regulators use one of two alpha source modes:
+  - `continuous_program`: NVSim's original `alpha_m(t)=f_m(t)` time-program mode.
+  - `state_anchor`: SERGIO-inspired state/bin anchors `B[state, m]`, with optional `step`, `linear`, or `sigmoid` parent-to-child transitions.
 - Non-master gene `alpha_i(t)` is recomputed from current regulator activity, `K`, edge sign, `half_response`, and `hill_coefficient`.
 - Regulator activity is configurable:
   - `spliced` (default): use `s_j(t)`
@@ -75,7 +77,7 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 4. Sample and concatenate cells in this order: trunk, `branch_0`, `branch_1`.
 5. Keep `pseudotime`, `local_time`, `branch`, `alpha`, `u`, `s`, and velocity aligned.
 
-Branch-specific master regulator programs can be supplied through `branch_master_programs`. State/bin-wise production profiles are also supported. Piecewise constant forcing is the default SERGIO-like behavior; continuous interpolation remains optional.
+Branch-specific master regulator programs can be supplied through `branch_master_programs`. State/bin-wise production profiles are supported through `alpha_source_mode="state_anchor"`. Static state anchors preserve the old production-state behavior; explicit state-anchor transitions can smoothly interpolate from trunk/progenitor production to child-lineage production, with `sigmoid` recommended for differentiation-like simulations.
 
 ## Supported Outputs
 

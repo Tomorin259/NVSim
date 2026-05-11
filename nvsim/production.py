@@ -27,6 +27,39 @@ PROGRAM_KINDS = {
     "sigmoid_decrease",
 }
 
+ALPHA_SOURCE_MODES = {"continuous_program", "state_anchor"}
+TRANSITION_SCHEDULES = {"step", "linear", "sigmoid"}
+
+
+def transition_weight(
+    fraction: float,
+    schedule: str = "sigmoid",
+    midpoint: float = 0.5,
+    steepness: float = 10.0,
+) -> float:
+    """Return interpolation weight for state-anchor master alpha transitions."""
+
+    if schedule not in TRANSITION_SCHEDULES:
+        raise ValueError("transition_schedule must be 'step', 'linear', or 'sigmoid'")
+    if midpoint < 0 or midpoint > 1:
+        raise ValueError("transition_midpoint must be in [0, 1]")
+    if steepness <= 0:
+        raise ValueError("transition_steepness must be positive")
+    x = float(np.clip(fraction, 0.0, 1.0))
+    if schedule == "step":
+        return 0.0 if x < midpoint else 1.0
+    if schedule == "linear":
+        return x
+
+    # Normalize the logistic curve so endpoints are exactly 0 and 1. This keeps
+    # state-anchor transitions easy to test and avoids a small endpoint offset.
+    lo = 1.0 / (1.0 + np.exp(-steepness * (0.0 - midpoint)))
+    hi = 1.0 / (1.0 + np.exp(-steepness * (1.0 - midpoint)))
+    value = 1.0 / (1.0 + np.exp(-steepness * (x - midpoint)))
+    if np.isclose(hi, lo):
+        return x
+    return float(np.clip((value - lo) / (hi - lo), 0.0, 1.0))
+
 
 @dataclass(frozen=True)
 class AlphaProgram:
@@ -174,15 +207,30 @@ class StateProductionProfile:
     ) -> pd.Series:
         """Linearly interpolate source alpha between two states.
 
-        This is an NVSim extension and is not the default SERGIO-like forcing
-        behavior.
+        Backward-compatible wrapper around ``source_alpha_transition`` with a
+        linear schedule.
         """
+
+        return self.source_alpha_transition(parent_state, child_state, fraction, schedule="linear", genes=genes)
+
+    def source_alpha_transition(
+        self,
+        parent_state: str,
+        child_state: str,
+        fraction: float,
+        schedule: str = "sigmoid",
+        midpoint: float = 0.5,
+        steepness: float = 10.0,
+        genes: list[str] | tuple[str, ...] | pd.Index | None = None,
+    ) -> pd.Series:
+        """Interpolate master alpha from a parent state anchor to a child anchor."""
 
         if fraction < 0 or fraction > 1:
             raise ValueError("fraction must be in [0, 1]")
         parent = self.source_alpha(parent_state)
         child = self.source_alpha(child_state)
-        alpha = parent + float(fraction) * (child - parent)
+        weight = transition_weight(fraction, schedule=schedule, midpoint=midpoint, steepness=steepness)
+        alpha = (1.0 - weight) * parent + weight * child
         if genes is not None:
             alpha = alpha.reindex([str(gene) for gene in genes], fill_value=0.0)
         alpha.index.name = "gene"

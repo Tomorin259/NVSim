@@ -23,6 +23,7 @@ from .production import (
     linear_increase,
     sigmoid_decrease,
     sigmoid_increase,
+    transition_weight,
 )
 
 # Simulation and observed-layer generation.
@@ -66,6 +67,7 @@ __all__ = [
     "linear_decrease",
     "sigmoid_increase",
     "sigmoid_decrease",
+    "transition_weight",
     "simulate_linear",
     "simulate_bifurcation",
     "generate_observed_counts",

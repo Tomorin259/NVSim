@@ -20,7 +20,9 @@ NVSim is intentionally smaller than SERGIO, VeloSim, dyngen, or scVelo-style pip
 - Explicit or inferred master regulators.
 - SERGIO-style additive Hill-function production rates for non-master genes.
 - Configurable regulator activity for Hill regulation: `spliced` (default), `unspliced`, or `total = u + s`.
-- State/bin-wise master-regulator production profiles.
+- Two master-regulator alpha source modes:
+  `continuous_program` for NVSim-style continuous alpha programs, and
+  `state_anchor` for SERGIO-style state/bin production anchors.
 - Deterministic RNA velocity ODEs for unspliced and spliced RNA.
 - Separate true and observed layers.
 - Linear and trunk-to-two-branch bifurcation simulation.
@@ -143,6 +145,21 @@ Observed-count generation currently supports:
 
 Metadata such as `grn_calibration` and `noise_config` is stored in the plain result dict and carried into AnnData output.
 
+### Master-Regulator Alpha Source Modes
+
+NVSim supports two master-regulator alpha source modes:
+
+- `continuous_program`: the original NVSim mode. Master regulator alpha is a
+  time function, `alpha_m(t) = f_m(t)`. This is useful for clean, controlled
+  pseudotime velocity benchmarks.
+- `state_anchor`: a SERGIO-inspired mode. Each state/bin/cell type has a
+  master-regulator production vector, and transitions can interpolate from a
+  parent state to a child state with `step`, `linear`, or `sigmoid` schedules.
+  `sigmoid` is recommended for differentiation-like trajectories because it
+  avoids hard production-rate jumps.
+
+See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
+
 NVSim uses SERGIO-style additive Hill regulation, but the default
 `regulator_activity="spliced"` is not the strict SERGIO-compatible dynamic
 regulator proxy.
@@ -166,6 +183,7 @@ If a `StateProductionProfile` is available, `simulate_linear()` and
 
 - [Current Status](CURRENT_STATUS.md)
 - [Validation Report](VALIDATION_REPORT.md)
+- [Alpha Source Modes](docs/alpha_source_modes.md)
 - [Chinese Model Notes](NVSim_model_cn.md)
 - [Examples Guide](examples/README.md)
 
@@ -191,7 +209,7 @@ GRN -> alpha(t) -> unspliced/spliced ODE -> true velocity -> snapshot cells -> o
 - 显式或自动推断的 master regulator。
 - 面向 non-master gene 的 SERGIO 风格加性 Hill 生产率模型。
 - 可配置的 regulator activity 调控活性代理：`spliced`（默认）、`unspliced` 或 `total = u + s`。
-- 按 state/bin 定义的 master regulator production profile。
+- 两种 master-regulator alpha source mode：`continuous_program` 保留 NVSim 原有连续时间程序，`state_anchor` 使用 SERGIO 风格 state/bin production anchor。
 - 面向 unspliced / spliced RNA 的确定性 RNA velocity ODE。
 - true layer 与 observed layer 分离。
 - linear 和 trunk-to-two-branch bifurcation 两类模拟。
@@ -276,6 +294,15 @@ python examples/plot_bifurcation.py
 
 同时，`grn_calibration` 和 `noise_config` 会保存在 result dict 中，并在导出 AnnData 时保留下来。
 
+### Master-Regulator Alpha Source Modes
+
+NVSim 现在支持两种 master regulator alpha 来源：
+
+- `continuous_program`：原有 NVSim 模式。master regulator alpha 是连续时间函数，即 `alpha_m(t) = f_m(t)`，适合干净、机制可控的 pseudotime velocity benchmark。
+- `state_anchor`：借鉴 SERGIO 的 state/bin production 设计。每个 state/bin/cell type 有一套 master-regulator production vector；transition 时可以用 `step`、`linear` 或 `sigmoid` 从 parent state 平滑过渡到 child state。分化轨迹默认推荐 `sigmoid`，避免 hard switching 造成表达或 embedding 断裂。
+
+详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。
+
 当前仍然是 SERGIO 风格的加性 Hill regulation，但默认的
 `regulator_activity="spliced"` 并不是严格的 SERGIO-compatible dynamic
 regulator proxy。
@@ -298,5 +325,6 @@ half-response calibration 也不再只能作为单独预处理步骤使用。
 
 - [Current Status](CURRENT_STATUS.md)
 - [Validation Report](VALIDATION_REPORT.md)
+- [Alpha Source Modes](docs/alpha_source_modes.md)
 - [Chinese Model Notes](NVSim_model_cn.md)
 - [Examples Guide](examples/README.md)

@@ -25,7 +25,7 @@ def _result():
             {
                 "regulator": ["g0"],
                 "target": ["g1"],
-                "weight": [0.8],
+                "K": [0.8],
                 "sign": ["activation"],
                 "half_response": [0.5],
             }
@@ -105,7 +105,7 @@ def test_dynamic_representative_selection_prefers_valid_edge_types():
             {
                 "regulator": ["g0", "g1"],
                 "target": ["g2", "g3"],
-                "weight": [0.8, 0.7],
+                "K": [0.8, 0.7],
                 "sign": ["activation", "repression"],
                 "half_response": [0.5, 0.5],
             }

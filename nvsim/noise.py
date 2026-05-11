@@ -16,13 +16,14 @@
 from __future__ import annotations
 
 import numpy as np
+import warnings
 
-CANONICAL_NOISE_MODELS = ("poisson_capture", "binomial_capture")
-LEGACY_NOISE_MODEL_ALIASES = {
+CANONICAL_CAPTURE_MODELS = ("poisson_capture", "binomial_capture")
+LEGACY_CAPTURE_MODEL_ALIASES = {
     "scale_poisson": "poisson_capture",
     "binomial": "binomial_capture",
 }
-SUPPORTED_NOISE_MODEL_NAMES = (*CANONICAL_NOISE_MODELS, *LEGACY_NOISE_MODEL_ALIASES.keys())
+SUPPORTED_CAPTURE_MODEL_NAMES = (*CANONICAL_CAPTURE_MODELS, *LEGACY_CAPTURE_MODEL_ALIASES.keys())
 
 
 def _valid_capture_model_message() -> str:
@@ -35,11 +36,19 @@ def _valid_capture_model_message() -> str:
 def _resolve_capture_model_name(capture_model: str | None) -> str:
     if capture_model is None:
         return "poisson_capture"
-    if capture_model in CANONICAL_NOISE_MODELS:
+    if capture_model in CANONICAL_CAPTURE_MODELS:
         return capture_model
-    if capture_model in LEGACY_NOISE_MODEL_ALIASES:
-        return LEGACY_NOISE_MODEL_ALIASES[capture_model]
+    if capture_model in LEGACY_CAPTURE_MODEL_ALIASES:
+        warnings.warn(
+            f"capture_model={capture_model!r} is a legacy alias; "
+            f"use {LEGACY_CAPTURE_MODEL_ALIASES[capture_model]!r} instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return LEGACY_CAPTURE_MODEL_ALIASES[capture_model]
     raise ValueError(_valid_capture_model_message())
+
+
 def generate_observed_counts(
     true_unspliced: object,
     true_spliced: object,

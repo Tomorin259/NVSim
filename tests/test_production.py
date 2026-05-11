@@ -34,10 +34,11 @@ def test_state_production_profile_reindexes_to_full_gene_order():
     assert alpha.to_dict() == {"g0": 1.5, "g1": 0.0, "g2": 4.0}
 
 
-def test_state_production_profile_interpolates_between_states():
+def test_state_production_profile_interpolated_warns_and_matches_linear_transition():
     profile = _profile()
 
-    alpha = profile.source_alpha_interpolated("bin_0", "bin_1", 0.25)
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        alpha = profile.source_alpha_interpolated("bin_0", "bin_1", 0.25)
 
     assert alpha.to_dict() == {"g0": 0.75, "g2": 2.5}
 
@@ -86,4 +87,4 @@ def test_state_production_profile_rejects_unknown_state_and_bad_fraction():
     with pytest.raises(ValueError, match="unknown production state"):
         profile.validate_states(["bin_0", "bin_9"])
     with pytest.raises(ValueError, match="fraction"):
-        profile.source_alpha_interpolated("bin_0", "bin_1", 1.1)
+        profile.source_alpha_transition("bin_0", "bin_1", 1.1)

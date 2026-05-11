@@ -5,7 +5,7 @@ import pytest
 from nvsim.grn import (
     GRN,
     build_graph_levels,
-    calibrate_grn_thresholds,
+    calibrate_grn_half_response,
     calibrate_half_response,
     estimate_state_mean_expression,
     identify_master_regulators,
@@ -277,7 +277,7 @@ def test_estimate_state_mean_expression_propagates_levelwise_for_acyclic_grn():
     assert np.allclose(means.loc[:, "g1"], [1.0, 1.5])
 
 
-def test_calibrate_grn_thresholds_fills_missing_half_response():
+def test_calibrate_grn_half_response_fills_missing_half_response():
     grn = GRN.from_dataframe(
         pd.DataFrame(
             {
@@ -292,14 +292,14 @@ def test_calibrate_grn_thresholds_fills_missing_half_response():
         master_regulators=["g0"],
     )
     production = pd.DataFrame({"g0": [1.0, 3.0]}, index=["bin_0", "bin_1"])
-    calibrated, meta = calibrate_grn_thresholds(grn, production)
+    calibrated, meta = calibrate_grn_half_response(grn, production)
     edges = calibrated.to_dataframe()
     assert np.isclose(edges.loc[0, "half_response"], 2.0)
     assert "threshold" not in edges.columns
-    assert meta["thresholds_filled_count"] == 1
+    assert meta["half_responses_filled_count"] == 1
 
 
-def test_calibrate_grn_thresholds_uses_fallback_for_cyclic_grn():
+def test_calibrate_grn_half_response_uses_fallback_for_cyclic_grn():
     grn = GRN.from_dataframe(
         pd.DataFrame(
             {
@@ -314,7 +314,7 @@ def test_calibrate_grn_thresholds_uses_fallback_for_cyclic_grn():
         master_regulators=["g0"],
     )
     production = pd.DataFrame({"g0": [2.0]}, index=["bin_0"])
-    calibrated, meta = calibrate_grn_thresholds(grn, production, fallback_half_response=1.5)
+    calibrated, meta = calibrate_grn_half_response(grn, production, fallback_half_response=1.5)
     edges = calibrated.to_dataframe()
     assert meta["calibration_method"] == "fallback_for_cyclic_grn"
     assert np.allclose(edges["half_response"], [1.5, 1.5])

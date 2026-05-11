@@ -18,7 +18,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from .grn import GRN, build_graph_levels, calibrate_grn_thresholds
+from .grn import GRN, build_graph_levels, calibrate_grn_half_response
 from .noise import _resolve_capture_model_name, generate_observed_counts
 from .output import make_result_dict
 from .production import AlphaProgram, StateProductionProfile, coerce_programs, constant
@@ -759,8 +759,8 @@ def _grn_calibration_summary(
         "master_regulators": list(master_genes),
         "gene_levels": dict(level_info["gene_to_level"]),
         "cyclic_or_acyclic": level_info["cyclic_or_acyclic"],
-        "thresholds_filled_count": 0,
-        "thresholds_missing_count": int(grn.edges["half_response"].isna().sum()),
+        "half_responses_filled_count": 0,
+        "half_responses_missing_count": int(grn.edges["half_response"].isna().sum()),
         "warnings": list(level_info["warnings"]),
     }
 
@@ -785,7 +785,7 @@ def _maybe_calibrate_grn(
     if auto_calibrate_half_response == "if_missing" and not missing_half_response:
         return grn, grn_calibration
 
-    calibrated_grn, calibration = calibrate_grn_thresholds(
+    calibrated_grn, calibration = calibrate_grn_half_response(
         grn,
         production_profile.rates,
         explicit_master_regulators=master_genes,
@@ -1552,6 +1552,12 @@ def simulate_bifurcation_legacy(
 ) -> dict:
     """Backward-compatible wrapper for the pre-state-anchor bifurcation API."""
 
+    warnings.warn(
+        "simulate_bifurcation_legacy() is deprecated; use simulate_bifurcation() with "
+        "trunk_state, branch_child_states, and transition_schedule instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     _warn_legacy_bifurcation_state_args(
         trunk_production_state=trunk_production_state,
         branch_production_states=branch_production_states,

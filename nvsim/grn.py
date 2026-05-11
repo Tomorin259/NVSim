@@ -382,7 +382,7 @@ def estimate_state_mean_expression(
     return means, levels
 
 
-def calibrate_grn_thresholds(
+def calibrate_grn_half_response(
     grn: GRN | pd.DataFrame,
     state_production: pd.DataFrame,
     *,
@@ -432,12 +432,38 @@ def calibrate_grn_thresholds(
         "master_regulators": level_info["master_regulators"],
         "gene_levels": level_info["gene_to_level"],
         "cyclic_or_acyclic": level_info["cyclic_or_acyclic"],
-        "thresholds_filled_count": int(filled),
+        "half_responses_filled_count": int(filled),
         "warnings": level_info["warnings"],
     }
     if isinstance(grn, GRN):
         return GRN.from_dataframe(calibrated, genes=grn.genes, master_regulators=grn.master_regulators), metadata
     return calibrated, metadata
+
+
+def calibrate_grn_thresholds(
+    grn: GRN | pd.DataFrame,
+    state_production: pd.DataFrame,
+    *,
+    explicit_master_regulators: Iterable[str] | None = None,
+    method: str = "mean",
+    fallback_half_response: float = 1.0,
+    target_leak_alpha: float | pd.Series | dict[str, float] = 0.0,
+) -> tuple[GRN | pd.DataFrame, dict[str, object]]:
+    """Legacy alias for half-response calibration."""
+
+    warnings.warn(
+        "calibrate_grn_thresholds() is deprecated; use calibrate_grn_half_response() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return calibrate_grn_half_response(
+        grn,
+        state_production,
+        explicit_master_regulators=explicit_master_regulators,
+        method=method,
+        fallback_half_response=fallback_half_response,
+        target_leak_alpha=target_leak_alpha,
+    )
 
 
 @dataclass(frozen=True)

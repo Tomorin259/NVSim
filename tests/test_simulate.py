@@ -427,7 +427,7 @@ def test_linear_simulation_can_auto_calibrate_missing_half_response():
     )
 
     assert result["uns"]["grn_calibration"]["calibration_method"] == "levelwise_state_mean"
-    assert result["uns"]["grn_calibration"]["thresholds_filled_count"] == grn.edges.shape[0]
+    assert result["uns"]["grn_calibration"]["half_responses_filled_count"] == grn.edges.shape[0]
     assert result["uns"]["simulation_config"]["auto_calibrate_half_response"] == "if_missing"
     assert pd.DataFrame(result["uns"]["true_grn"])["half_response"].notna().all()
 

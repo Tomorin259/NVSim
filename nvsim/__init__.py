@@ -6,7 +6,7 @@ from .config import GRNConfig
 from .grn import (
     GRN,
     build_graph_levels,
-    calibrate_grn_thresholds,
+    calibrate_grn_half_response,
     calibrate_half_response,
     estimate_state_mean_expression,
     identify_master_regulators,
@@ -51,7 +51,7 @@ __all__ = [
     "identify_master_regulators",
     "build_graph_levels",
     "estimate_state_mean_expression",
-    "calibrate_grn_thresholds",
+    "calibrate_grn_half_response",
     "calibrate_half_response",
     "validate_grn",
     "hill_activation",

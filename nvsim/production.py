@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Mapping
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -51,8 +52,6 @@ def transition_weight(
     if schedule == "linear":
         return x
 
-    # Normalize the logistic curve so endpoints are exactly 0 and 1. This keeps
-    # state-anchor transitions easy to test and avoids a small endpoint offset.
     lo = 1.0 / (1.0 + np.exp(-steepness * (0.0 - midpoint)))
     hi = 1.0 / (1.0 + np.exp(-steepness * (1.0 - midpoint)))
     value = 1.0 / (1.0 + np.exp(-steepness * (x - midpoint)))
@@ -154,13 +153,7 @@ def evaluate_programs(
 
 @dataclass(frozen=True)
 class StateProductionProfile:
-    """Master/source production rates indexed by discrete state.
-
-    ``rates`` is a states x genes table. Rows are states such as ``bin_0`` or
-    ``branch_0``. Columns are source/master regulator gene ids. Values are
-    non-negative production rates that can be used as alpha values for those
-    source genes.
-    """
+    """Master/source production rates indexed by discrete state."""
 
     rates: pd.DataFrame
 
@@ -205,12 +198,13 @@ class StateProductionProfile:
         fraction: float,
         genes: list[str] | tuple[str, ...] | pd.Index | None = None,
     ) -> pd.Series:
-        """Linearly interpolate source alpha between two states.
+        """Legacy linear interpolation helper around source_alpha_transition()."""
 
-        Backward-compatible wrapper around ``source_alpha_transition`` with a
-        linear schedule.
-        """
-
+        warnings.warn(
+            "source_alpha_interpolated() is deprecated; use source_alpha_transition(..., schedule='linear') instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.source_alpha_transition(parent_state, child_state, fraction, schedule="linear", genes=genes)
 
     def source_alpha_transition(

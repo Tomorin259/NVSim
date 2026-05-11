@@ -24,6 +24,14 @@ examples/plots_bifurcation/
 examples/plots_sergio_yeast400_bifurcation/
 examples/linear_plots/
 
+# Local external-data regeneration artifacts
+data/external/celloracle_demo/raw/
+data/external/celloracle_demo/base_edges.csv
+data/external/celloracle_demo/global_target_prediction_metrics.csv
+data/external/celloracle_demo/cluster_target_prediction_metrics.csv
+data/external/celloracle_demo/skipped_targets.csv
+data/external/celloracle_demo/figures/
+
 # Local notebooks and scratch files
 .ipynb_checkpoints/
 .DS_Store

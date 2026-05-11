@@ -15,7 +15,7 @@ def _small_grn():
             "target": ["g2", "g3"],
             "K": [0.7, 0.4],
             "sign": ["activation", "repression"],
-            "threshold": [0.5, 0.5],
+            "half_response": [0.5, 0.5],
             "hill_coefficient": [2.0, 2.0],
         }
     )
@@ -515,13 +515,13 @@ def test_result_uns_contains_grn_and_noise_metadata():
         dt=0.05,
         seed=5,
         capture_rate=0.3,
-        noise_model="binomial_capture",
+        capture_model="binomial_capture",
     )
 
     assert set(["true_grn", "grn_calibration", "kinetic_params", "simulation_config", "noise_config"]).issubset(
         result["uns"].keys()
     )
-    assert result["uns"]["noise_config"]["noise_model"] == "binomial_capture"
+    assert result["uns"]["noise_config"]["capture_model"] == "binomial_capture"
     assert result["var"]["true_beta"].shape[0] == 4
     assert result["var"]["true_gamma"].shape[0] == 4
 
@@ -537,8 +537,8 @@ def test_capture_model_binomial_capture_records_canonical_noise_metadata():
         capture_rate=0.3,
         capture_model="binomial_capture",
     )
-    assert result["uns"]["simulation_config"]["noise_model"] == "binomial_capture"
-    assert result["uns"]["noise_config"]["noise_model"] == "binomial_capture"
+    assert result["uns"]["simulation_config"]["capture_model"] == "binomial_capture"
+    assert result["uns"]["noise_config"]["capture_model"] == "binomial_capture"
 
 
 def test_regulator_activity_modes_change_alpha_as_expected():
@@ -588,7 +588,7 @@ def test_invalid_regulator_activity_raises():
 def test_constant_alpha_linear_ode_approaches_steady_state():
     genes = ["g0"]
     grn = GRN.from_dataframe(
-        pd.DataFrame(columns=["regulator", "target", "weight", "sign"]),
+        pd.DataFrame(columns=["regulator", "target", "K", "sign"]),
         genes=genes,
     )
     alpha = 2.0

@@ -1,5 +1,4 @@
 import numpy as np
-
 from nvsim.noise import generate_observed_counts
 
 
@@ -38,7 +37,7 @@ def test_binomial_capture_matches_velosim_style_round_then_capture():
         true_s,
         seed=7,
         capture_rate=0.5,
-        noise_model="binomial_capture",
+        capture_model="binomial_capture",
         dropout_rate=0.0,
     )
 
@@ -70,7 +69,7 @@ def test_capture_model_binomial_capture_alias_also_works():
     assert np.all(observed["spliced"] >= 0.0)
 
 
-def test_noise_model_scale_poisson_alias_also_works():
+def test_capture_model_scale_poisson_legacy_alias_also_works():
     true_u = np.array([[0.2, 1.7], [2.3, 4.9]], dtype=float)
     true_s = np.array([[1.2, 0.6], [0.8, 2.1]], dtype=float)
     observed = generate_observed_counts(
@@ -78,7 +77,22 @@ def test_noise_model_scale_poisson_alias_also_works():
         true_s,
         seed=17,
         capture_rate=0.5,
-        noise_model="scale_poisson",
+        capture_model="scale_poisson",
+        dropout_rate=0.0,
+    )
+    assert observed["unspliced"].shape == true_u.shape
+    assert observed["spliced"].shape == true_s.shape
+
+
+def test_capture_model_binomial_legacy_alias_also_works():
+    true_u = np.array([[0.2, 1.7], [2.3, 4.9]], dtype=float)
+    true_s = np.array([[1.2, 0.6], [0.8, 2.1]], dtype=float)
+    observed = generate_observed_counts(
+        true_u,
+        true_s,
+        seed=17,
+        capture_rate=0.5,
+        capture_model="binomial",
         dropout_rate=0.0,
     )
     assert observed["unspliced"].shape == true_u.shape
@@ -90,7 +104,7 @@ def test_binomial_capture_requires_capture_rate():
     true_s = np.array([[1.0]])
 
     try:
-        generate_observed_counts(true_u, true_s, noise_model="binomial_capture")
+        generate_observed_counts(true_u, true_s, capture_model="binomial_capture")
     except ValueError as exc:
         assert "capture_rate" in str(exc)
     else:
@@ -106,7 +120,7 @@ def test_binomial_capture_rate_one_returns_rounded_truth():
         true_s,
         seed=11,
         capture_rate=1.0,
-        noise_model="binomial_capture",
+        capture_model="binomial_capture",
         dropout_rate=0.0,
     )
 
@@ -123,7 +137,7 @@ def test_binomial_capture_rate_zero_returns_all_zeros():
         true_s,
         seed=13,
         capture_rate=0.0,
-        noise_model="binomial_capture",
+        capture_model="binomial_capture",
         dropout_rate=0.0,
     )
 
@@ -140,7 +154,7 @@ def test_dropout_rate_one_returns_all_zeros():
         true_s,
         seed=19,
         capture_rate=0.7,
-        capture_model="scale_poisson",
+        capture_model="poisson_capture",
         dropout_rate=1.0,
     )
 
@@ -157,7 +171,7 @@ def test_same_seed_reproduces_noise_exactly():
         true_s,
         seed=23,
         capture_rate=0.5,
-        noise_model="binomial_capture",
+        capture_model="binomial_capture",
         dropout_rate=0.2,
     )
     observed2 = generate_observed_counts(
@@ -165,7 +179,7 @@ def test_same_seed_reproduces_noise_exactly():
         true_s,
         seed=23,
         capture_rate=0.5,
-        noise_model="binomial_capture",
+        capture_model="binomial_capture",
         dropout_rate=0.2,
     )
 
@@ -181,16 +195,5 @@ def test_invalid_capture_model_raises_clear_error():
         generate_observed_counts(true_u, true_s, capture_model="unknown")
     except ValueError as exc:
         assert "capture_model" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
-
-
-def test_invalid_noise_model_raises_clear_error():
-    true_u = np.array([[1.0]])
-    true_s = np.array([[1.0]])
-    try:
-        generate_observed_counts(true_u, true_s, noise_model="unknown")
-    except ValueError as exc:
-        assert "noise_model" in str(exc)
     else:
         raise AssertionError("expected ValueError")

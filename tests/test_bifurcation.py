@@ -5,7 +5,7 @@ import pytest
 from nvsim.grn import GRN
 from nvsim.production import StateProductionProfile
 from nvsim.production import linear_decrease, linear_increase
-from nvsim.simulate import simulate_bifurcation
+from nvsim.simulate import simulate_bifurcation, simulate_bifurcation_legacy
 
 
 def _small_grn():
@@ -16,7 +16,7 @@ def _small_grn():
             "target": ["g2", "g3"],
             "K": [0.7, 0.4],
             "sign": ["activation", "repression"],
-            "threshold": [0.5, 0.5],
+            "half_response": [0.5, 0.5],
             "hill_coefficient": [2.0, 2.0],
         }
     )
@@ -183,8 +183,10 @@ def test_bifurcation_can_use_state_production_profile():
         branch_time=0.8,
         dt=0.04,
         production_profile=production,
-        trunk_production_state="trunk_state",
-        branch_production_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        trunk_state="trunk_state",
+        branch_child_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        transition_schedule="step",
+        transition_midpoint=0.0,
         seed=41,
         poisson_observed=False,
     )
@@ -218,9 +220,9 @@ def test_bifurcation_interpolation_is_optional_not_default():
         branch_time=0.8,
         dt=0.04,
         production_profile=production,
-        trunk_production_state="trunk_state",
-        branch_production_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
-        interpolate_production=True,
+        trunk_state="trunk_state",
+        branch_child_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        transition_schedule="linear",
         seed=43,
         poisson_observed=False,
     )
@@ -299,6 +301,32 @@ def test_bifurcation_state_arguments_require_production_profile():
         )
 
 
+def test_bifurcation_legacy_wrapper_maps_to_canonical_state_anchor():
+    production = StateProductionProfile(
+        pd.DataFrame(
+            {
+                "g0": [0.4, 1.4, 0.1],
+                "g1": [0.5, 0.2, 1.5],
+            },
+            index=["progenitor", "lineage_A", "lineage_B"],
+        )
+    )
+
+    with pytest.warns(DeprecationWarning, match="Legacy bifurcation production-profile arguments"):
+        result = simulate_bifurcation_legacy(
+            _small_grn(),
+            production_profile=production,
+            trunk_production_state="progenitor",
+            branch_production_states={"branch_0": "lineage_A", "branch_1": "lineage_B"},
+            interpolate_production=True,
+            seed=43,
+            poisson_observed=False,
+        )
+    assert result["uns"]["simulation_config"]["trunk_state"] == "progenitor"
+    assert result["uns"]["simulation_config"]["branch_child_states"] == {"branch_0": "lineage_A", "branch_1": "lineage_B"}
+    assert result["uns"]["simulation_config"]["transition_schedule"] == "linear"
+
+
 def test_bifurcation_subset_fill_uses_default_for_missing_master_alpha():
     production = StateProductionProfile(
         pd.DataFrame(
@@ -335,8 +363,8 @@ def test_bifurcation_requires_known_production_states():
         simulate_bifurcation(
             _small_grn(),
             production_profile=production,
-            trunk_production_state="trunk_state",
-            branch_production_states={"branch_0": "missing", "branch_1": "missing"},
+            trunk_state="trunk_state",
+            branch_child_states={"branch_0": "missing", "branch_1": "missing"},
         )
 
 
@@ -359,8 +387,10 @@ def test_bifurcation_can_auto_calibrate_missing_half_response():
         branch_time=0.8,
         dt=0.04,
         production_profile=production,
-        trunk_production_state="trunk_state",
-        branch_production_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        trunk_state="trunk_state",
+        branch_child_states={"branch_0": "branch_0_state", "branch_1": "branch_1_state"},
+        transition_schedule="step",
+        transition_midpoint=0.0,
         auto_calibrate_half_response="if_missing",
         seed=59,
         poisson_observed=False,
@@ -461,14 +491,14 @@ def test_bifurcation_output_contains_standardized_metadata():
         dt=0.04,
         seed=53,
         poisson_observed=False,
-        noise_model="poisson_capture",
+        capture_model="poisson_capture",
     )
 
     assert set(["gene_role", "gene_class", "gene_level", "true_beta", "true_gamma"]).issubset(result["var"].columns)
     assert set(["true_grn", "grn_calibration", "kinetic_params", "simulation_config", "noise_config"]).issubset(
         result["uns"].keys()
     )
-    assert result["uns"]["noise_config"]["noise_model"] == "poisson_capture"
+    assert result["uns"]["noise_config"]["capture_model"] == "poisson_capture"
 
 
 def test_bifurcation_capture_model_binomial_capture_records_canonical_noise_metadata():
@@ -483,8 +513,8 @@ def test_bifurcation_capture_model_binomial_capture_records_canonical_noise_meta
         capture_rate=0.4,
         capture_model="binomial_capture",
     )
-    assert result["uns"]["simulation_config"]["noise_model"] == "binomial_capture"
-    assert result["uns"]["noise_config"]["noise_model"] == "binomial_capture"
+    assert result["uns"]["simulation_config"]["capture_model"] == "binomial_capture"
+    assert result["uns"]["noise_config"]["capture_model"] == "binomial_capture"
 
 
 def test_bifurcation_without_branch_specific_difference_is_recorded_as_control():

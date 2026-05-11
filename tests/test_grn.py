@@ -27,10 +27,9 @@ def test_validate_grn_fills_defaults_and_normalizes_signs():
 
     assert list(normalized["sign"]) == ["activation", "repression"]
     assert list(normalized["K"]) == [1.0, 0.5]
-    assert list(normalized["weight"]) == [1.0, 0.5]
     assert list(normalized["hill_coefficient"]) == [2.0, 2.0]
     assert normalized["half_response"].isna().all()
-    assert normalized["threshold"].isna().all()
+    assert set(normalized.columns) == {"regulator", "target", "sign", "K", "half_response", "hill_coefficient"}
 
 
 def test_validate_grn_accepts_weight_alias_for_K():
@@ -43,13 +42,33 @@ def test_validate_grn_accepts_weight_alias_for_K():
         }
     )
 
-    normalized = validate_grn(edges)
+    with pytest.warns(DeprecationWarning, match="legacy alias"):
+        normalized = validate_grn(edges)
 
     assert normalized.loc[0, "K"] == 3.5
-    assert normalized.loc[0, "weight"] == 3.5
+    assert "weight" not in normalized.columns
 
 
-def test_validate_grn_accepts_half_response_and_keeps_threshold_alias():
+def test_validate_grn_threshold_alias_emits_deprecation_warning():
+    edges = pd.DataFrame(
+        {
+            "regulator": ["g1"],
+            "target": ["g2"],
+            "K": [1.0],
+            "sign": ["activation"],
+            "threshold": [2.5],
+            "hill_coefficient": [2.0],
+        }
+    )
+
+    with pytest.warns(DeprecationWarning, match="legacy alias"):
+        normalized = validate_grn(edges)
+
+    assert normalized.loc[0, "half_response"] == 2.5
+    assert "threshold" not in normalized.columns
+
+
+def test_validate_grn_accepts_half_response_as_canonical_column():
     edges = pd.DataFrame(
         {
             "regulator": ["g1"],
@@ -64,7 +83,7 @@ def test_validate_grn_accepts_half_response_and_keeps_threshold_alias():
     normalized = validate_grn(edges)
 
     assert normalized.loc[0, "half_response"] == 2.5
-    assert normalized.loc[0, "threshold"] == 2.5
+    assert "threshold" not in normalized.columns
 
 
 def test_validate_grn_keeps_missing_half_response_for_later_calibration():
@@ -98,7 +117,7 @@ def test_grn_rejects_unknown_genes():
         GRN.from_dataframe(edges, genes=["g1"])
 
 
-def test_calibrate_half_response_from_series_updates_alias_columns():
+def test_calibrate_half_response_from_series_updates_canonical_columns():
     grn = GRN.from_dataframe(
         pd.DataFrame(
             {
@@ -115,7 +134,7 @@ def test_calibrate_half_response_from_series_updates_alias_columns():
     edges = calibrated.to_dataframe()
 
     assert list(edges["half_response"]) == [2.5, 1.5]
-    assert list(edges["threshold"]) == [2.5, 1.5]
+    assert "threshold" not in edges.columns
 
 
 def test_calibrate_half_response_from_dataframe_uses_column_means():
@@ -276,7 +295,7 @@ def test_calibrate_grn_thresholds_fills_missing_half_response():
     calibrated, meta = calibrate_grn_thresholds(grn, production)
     edges = calibrated.to_dataframe()
     assert np.isclose(edges.loc[0, "half_response"], 2.0)
-    assert np.isclose(edges.loc[0, "threshold"], 2.0)
+    assert "threshold" not in edges.columns
     assert meta["thresholds_filled_count"] == 1
 
 

@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .grn import GRN, build_graph_levels, calibrate_grn_thresholds
-from .noise import generate_observed_counts
+from .noise import _resolve_capture_model_name, generate_observed_counts
 from .output import make_result_dict
 from .production import AlphaProgram, StateProductionProfile, coerce_programs, constant
 from .regulation import compute_alpha
@@ -231,27 +231,6 @@ def _serialize_master_programs(programs: Mapping[str, AlphaProgram]) -> dict[str
     }
 
 
-def _resolve_noise_model_name(noise_model: str | None, capture_model: str | None) -> str:
-    alias_map = {
-        "scale_poisson": "poisson_capture",
-        "poisson_capture": "poisson_capture",
-        "binomial": "binomial_capture",
-        "binomial_capture": "binomial_capture",
-    }
-    if noise_model is not None:
-        if noise_model not in alias_map:
-            raise ValueError(
-                "noise_model must be one of 'scale_poisson', 'poisson_capture', 'binomial', or 'binomial_capture'"
-            )
-        return alias_map[noise_model]
-    model = "scale_poisson" if capture_model is None else capture_model
-    if model not in alias_map:
-        raise ValueError(
-            "capture_model must be one of 'scale_poisson', 'poisson_capture', 'binomial', or 'binomial_capture'"
-        )
-    return alias_map[model]
-
-
 def _validate_profile_genes(
     production_profile: StateProductionProfile,
     master_genes: tuple[str, ...],
@@ -331,26 +310,56 @@ def _state_transition_source_alpha_fn(
     return resolve
 
 
+def _coerce_branch_state_mapping(
+    branch_states: Mapping[str, str] | tuple[str, str] | list[str],
+    branch_labels: tuple[str, str],
+    *,
+    parameter_name: str,
+) -> dict[str, str]:
+    if isinstance(branch_states, Mapping):
+        missing = [branch for branch in branch_labels if branch not in branch_states]
+        if missing:
+            raise ValueError(f"{parameter_name} missing branches: {missing}")
+        return {branch: str(branch_states[branch]) for branch in branch_labels}
+    if len(branch_states) != len(branch_labels):
+        raise ValueError(f"{parameter_name} must contain exactly two states for branch_0 and branch_1")
+    return {branch: str(state) for branch, state in zip(branch_labels, branch_states)}
+
+
 def _resolve_branch_child_states(
     branch_child_states: Mapping[str, str] | tuple[str, str] | list[str] | None,
-    branch_production_states: Mapping[str, str] | None,
     branch_labels: tuple[str, str],
 ) -> dict[str, str] | None:
-    if branch_child_states is None:
-        if branch_production_states is None:
-            return None
-        missing = [branch for branch in branch_labels if branch not in branch_production_states]
-        if missing:
-            raise ValueError(f"branch_production_states missing branches: {missing}")
-        return {branch: str(branch_production_states[branch]) for branch in branch_labels}
-    if isinstance(branch_child_states, Mapping):
-        missing = [branch for branch in branch_labels if branch not in branch_child_states]
-        if missing:
-            raise ValueError(f"branch_child_states missing branches: {missing}")
-        return {branch: str(branch_child_states[branch]) for branch in branch_labels}
-    if len(branch_child_states) != len(branch_labels):
-        raise ValueError("branch_child_states must contain exactly two states for branch_0 and branch_1")
-    return {branch: str(state) for branch, state in zip(branch_labels, branch_child_states)}
+    if branch_child_states is not None:
+        return _coerce_branch_state_mapping(
+            branch_child_states,
+            branch_labels,
+            parameter_name="branch_child_states",
+        )
+    return None
+
+
+def _warn_legacy_bifurcation_state_args(
+    *,
+    trunk_production_state: str | None,
+    branch_production_states: Mapping[str, str] | None,
+    interpolate_production: bool,
+) -> None:
+    legacy_args: list[str] = []
+    if trunk_production_state is not None:
+        legacy_args.append("trunk_production_state")
+    if branch_production_states is not None:
+        legacy_args.append("branch_production_states")
+    if interpolate_production:
+        legacy_args.append("interpolate_production")
+    if legacy_args:
+        warnings.warn(
+            "Legacy bifurcation production-profile arguments "
+            + ", ".join(legacy_args)
+            + " are deprecated; prefer trunk_state + branch_child_states + transition_schedule.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
 
 
 def _alpha_from_state(
@@ -818,10 +827,8 @@ def _observed_from_true(
     capture_rate: float | None,
     poisson_observed: bool,
     dropout_rate: float,
-    noise_model: str | None = None,
-    capture_model: str = "scale_poisson",
+    capture_model: str | None = None,
 ) -> dict[str, np.ndarray]:
-    _resolve_noise_model_name(noise_model, capture_model)
     return generate_observed_counts(
         true_u,
         true_s,
@@ -829,7 +836,6 @@ def _observed_from_true(
         capture_rate=capture_rate,
         poisson=poisson_observed,
         dropout_rate=dropout_rate,
-        noise_model=noise_model,
         capture_model=capture_model,
     )
 
@@ -842,37 +848,6 @@ def _merge_programs(
     if overrides:
         merged.update(coerce_programs(overrides))
     return merged
-
-
-def _branch_source_alpha_fn(
-    production_profile: StateProductionProfile,
-    trunk_state: str,
-    branch_state: str,
-    trunk_time: float,
-    branch_time: float,
-    genes: tuple[str, ...],
-    master_genes: tuple[str, ...],
-    default_master_alpha: float,
-    profile_gene_policy: str,
-) -> Callable[[float], pd.Series]:
-    """Backward-compatible branch interpolation helper using a linear schedule."""
-
-    return _state_transition_source_alpha_fn(
-        production_profile,
-        trunk_state,
-        branch_state,
-        trunk_time,
-        branch_time,
-        genes,
-        master_genes,
-        default_master_alpha,
-        profile_gene_policy,
-        "linear",
-        0.5,
-        10.0,
-    )
-
-
 def _branch_programs_differ(
     base_programs: Mapping[str, AlphaProgram],
     branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None,
@@ -912,8 +887,7 @@ def simulate_linear(
     capture_rate: float | None = None,
     poisson_observed: bool = True,
     dropout_rate: float = 0.0,
-    noise_model: str | None = None,
-    capture_model: str = "scale_poisson",
+    capture_model: str | None = None,
     regulator_activity: str = "spliced",
     auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
@@ -1045,7 +1019,7 @@ def simulate_linear(
     true_v = segment["velocity"][sampled_idx]
     true_velocity_u = segment["true_velocity_u"][sampled_idx]
     true_alpha = segment["alpha"][sampled_idx]
-    resolved_noise_model = _resolve_noise_model_name(noise_model, capture_model)
+    resolved_capture_model = _resolve_capture_model_name(capture_model)
     observed = _observed_from_true(
         true_u,
         true_s,
@@ -1054,8 +1028,7 @@ def simulate_linear(
         capture_rate=capture_rate,
         poisson_observed=poisson_observed,
         dropout_rate=dropout_rate,
-        noise_model=noise_model,
-        capture_model=capture_model,
+        capture_model=resolved_capture_model,
     )
 
     obs = pd.DataFrame(
@@ -1108,8 +1081,7 @@ def simulate_linear(
         "auto_calibrate_half_response": auto_calibrate_half_response,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
-        "noise_model": resolved_noise_model,
-        "capture_model": capture_model,
+        "capture_model": resolved_capture_model,
         "regulator_activity": regulator_activity,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
@@ -1120,7 +1092,7 @@ def simulate_linear(
         "time_index_scope": "segment_local",
     }
     noise_config = {
-        "noise_model": config["noise_model"],
+        "capture_model": config["capture_model"],
         "capture_rate": capture_rate,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
@@ -1164,9 +1136,6 @@ def simulate_bifurcation(
     s0: object | None = None,
     master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
     production_profile: StateProductionProfile | None = None,
-    trunk_production_state: str | None = None,
-    branch_production_states: Mapping[str, str] | None = None,
-    interpolate_production: bool = False,
     master_programs: Mapping[str, AlphaProgram | float] | None = None,
     branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
     default_master_alpha: float = 0.5,
@@ -1177,8 +1146,7 @@ def simulate_bifurcation(
     capture_rate: float | None = None,
     poisson_observed: bool = True,
     dropout_rate: float = 0.0,
-    noise_model: str | None = None,
-    capture_model: str = "scale_poisson",
+    capture_model: str | None = None,
     regulator_activity: str = "spliced",
     auto_calibrate_half_response: bool | str = False,
     grn_calibration: Mapping[str, object] | None = None,
@@ -1202,8 +1170,9 @@ def simulate_bifurcation(
     ``uns["segment_time_courses"]`` arrays are timepoints x genes. If no
     ``branch_master_programs`` are supplied, both branches share the same master
     regulator programs and may follow identical dynamics from the inherited
-    state. If ``production_profile`` is supplied, trunk source alpha comes from
-    ``trunk_production_state`` and branch source alpha uses each branch state.
+    state. For production-profile runs, use the canonical state-anchor
+    interface: ``trunk_state`` + ``branch_child_states`` +
+    ``transition_schedule``.
     """
 
     branch_labels = ("branch_0", "branch_1")
@@ -1225,15 +1194,14 @@ def simulate_bifurcation(
         allow_profile_targets_as_masters=allow_profile_targets_as_masters,
         profile_gene_policy=profile_gene_policy,
     )
-    resolved_trunk_state = trunk_state if trunk_state is not None else trunk_production_state
-    resolved_branch_child_states = _resolve_branch_child_states(branch_child_states, branch_production_states, branch_labels)
+    resolved_trunk_state = trunk_state
+    resolved_branch_child_states = _resolve_branch_child_states(branch_child_states, branch_labels)
     resolved_alpha_source_mode = _resolve_alpha_source_mode(
         alpha_source_mode,
         production_profile=production_profile,
         production_state=resolved_trunk_state,
-        state_args_present=branch_child_states is not None or branch_production_states is not None,
+        state_args_present=branch_child_states is not None,
     )
-    use_anchor_transition = alpha_source_mode == "state_anchor" or branch_child_states is not None
     trunk_source_alpha = None
     branch_source_alpha: dict[str, pd.Series] = {}
     branch_source_alpha_fns: dict[str, Callable[[float], pd.Series]] = {}
@@ -1241,9 +1209,9 @@ def simulate_bifurcation(
         if production_profile is None:
             raise ValueError("state_anchor state arguments require production_profile")
         if resolved_trunk_state is None:
-            raise ValueError("trunk_state or trunk_production_state must be provided for state_anchor bifurcation")
+            raise ValueError("trunk_state must be provided for state_anchor bifurcation")
         if resolved_branch_child_states is None:
-            raise ValueError("branch_child_states or branch_production_states must be provided for state_anchor bifurcation")
+            raise ValueError("branch_child_states must be provided for state_anchor bifurcation")
         _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
         production_profile.validate_states(
             [resolved_trunk_state, *(resolved_branch_child_states[branch] for branch in branch_labels)]
@@ -1269,42 +1237,20 @@ def simulate_bifurcation(
         )
         for branch in branch_labels:
             child_state = resolved_branch_child_states[branch]
-            if use_anchor_transition:
-                branch_source_alpha_fns[branch] = _state_transition_source_alpha_fn(
-                    production_profile,
-                    resolved_trunk_state,
-                    child_state,
-                    trunk_time,
-                    branch_time,
-                    grn.genes,
-                    master_genes,
-                    default_master_alpha,
-                    profile_gene_policy,
-                    transition_schedule,
-                    transition_midpoint,
-                    transition_steepness,
-                )
-            elif interpolate_production:
-                branch_source_alpha_fns[branch] = _branch_source_alpha_fn(
-                    production_profile,
-                    resolved_trunk_state,
-                    child_state,
-                    trunk_time,
-                    branch_time,
-                    grn.genes,
-                    master_genes,
-                    default_master_alpha,
-                    profile_gene_policy,
-                )
-            else:
-                branch_source_alpha[branch] = _source_alpha_from_profile(
-                    production_profile,
-                    child_state,
-                    grn.genes,
-                    master_genes,
-                    default_master_alpha,
-                    profile_gene_policy,
-                )
+            branch_source_alpha_fns[branch] = _state_transition_source_alpha_fn(
+                production_profile,
+                resolved_trunk_state,
+                child_state,
+                trunk_time,
+                branch_time,
+                grn.genes,
+                master_genes,
+                default_master_alpha,
+                profile_gene_policy,
+                transition_schedule,
+                transition_midpoint,
+                transition_steepness,
+            )
 
     total_program_time = trunk_time + branch_time
     branch_divergence_source = "none"
@@ -1404,6 +1350,7 @@ def simulate_bifurcation(
     true_v = np.concatenate([segment["velocity"][idx] for _, segment, idx in sampled_segments], axis=0)
     true_velocity_u = np.concatenate([segment["true_velocity_u"][idx] for _, segment, idx in sampled_segments], axis=0)
     true_alpha = np.concatenate([segment["alpha"][idx] for _, segment, idx in sampled_segments], axis=0)
+    resolved_capture_model = _resolve_capture_model_name(capture_model)
     observed = _observed_from_true(
         true_u,
         true_s,
@@ -1412,8 +1359,7 @@ def simulate_bifurcation(
         capture_rate=capture_rate,
         poisson_observed=poisson_observed,
         dropout_rate=dropout_rate,
-        noise_model=noise_model,
-        capture_model=capture_model,
+        capture_model=resolved_capture_model,
     )
 
     trunk_global = np.arange(trunk["u"].shape[0], dtype=int)
@@ -1495,22 +1441,18 @@ def simulate_bifurcation(
         "production_profile_states": list(production_profile.states) if production_profile is not None else None,
         "production_profile_master_genes": list(production_profile.genes) if production_profile is not None else None,
         "trunk_state": resolved_trunk_state,
-        "trunk_production_state": trunk_production_state,
         "branch_child_states": dict(resolved_branch_child_states) if resolved_branch_child_states is not None else None,
-        "branch_production_states": dict(branch_production_states) if branch_production_states is not None else None,
         "profile_gene_policy": profile_gene_policy if resolved_alpha_source_mode == "state_anchor" else None,
-        "transition_schedule": transition_schedule if use_anchor_transition else ("linear" if interpolate_production else "step"),
-        "transition_midpoint": transition_midpoint if use_anchor_transition else None,
-        "transition_steepness": transition_steepness if use_anchor_transition else None,
-        "interpolate_production": interpolate_production,
+        "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
+        "transition_midpoint": transition_midpoint if resolved_alpha_source_mode == "state_anchor" else None,
+        "transition_steepness": transition_steepness if resolved_alpha_source_mode == "state_anchor" else None,
         "auto_calibrate_half_response": auto_calibrate_half_response,
         "branch_master_programs_enabled": branch_master_programs is not None,
         "branch_divergence_configured": branch_divergence_configured,
         "branch_divergence_source": branch_divergence_source,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
-        "noise_model": _resolve_noise_model_name(noise_model, capture_model),
-        "capture_model": capture_model,
+        "capture_model": resolved_capture_model,
         "regulator_activity": regulator_activity,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
@@ -1523,7 +1465,7 @@ def simulate_bifurcation(
         "time_index_scope": "segment_local",
     }
     noise_config = {
-        "noise_model": config["noise_model"],
+        "capture_model": config["capture_model"],
         "capture_rate": capture_rate,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
@@ -1570,3 +1512,86 @@ def simulate_bifurcation(
         "branch_1_initial_s": branch_segments["branch_1"]["s"][0].copy(),
     }
     return result
+
+
+def simulate_bifurcation_legacy(
+    grn: GRN,
+    n_trunk_cells: int = 50,
+    n_branch_cells: int | Mapping[str, int] = 60,
+    trunk_time: float = 2.0,
+    branch_time: float = 2.0,
+    dt: float = 0.01,
+    beta: object | None = None,
+    gamma: object | None = None,
+    u0: object | None = None,
+    s0: object | None = None,
+    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
+    production_profile: StateProductionProfile | None = None,
+    trunk_production_state: str | None = None,
+    branch_production_states: Mapping[str, str] | None = None,
+    interpolate_production: bool = False,
+    master_programs: Mapping[str, AlphaProgram | float] | None = None,
+    branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
+    default_master_alpha: float = 0.5,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
+    alpha_max: float | None = None,
+    seed: int = 0,
+    noise_seed: int | None = None,
+    capture_rate: float | None = None,
+    poisson_observed: bool = True,
+    dropout_rate: float = 0.0,
+    capture_model: str | None = None,
+    regulator_activity: str = "spliced",
+    auto_calibrate_half_response: bool | str = False,
+    grn_calibration: Mapping[str, object] | None = None,
+    return_edge_contributions: bool = False,
+    allow_profile_targets_as_masters: bool = False,
+    include_branch_initial_state: bool = False,
+    allow_snapshot_replacement: bool = False,
+    profile_gene_policy: str = "exact",
+) -> dict:
+    """Backward-compatible wrapper for the pre-state-anchor bifurcation API."""
+
+    _warn_legacy_bifurcation_state_args(
+        trunk_production_state=trunk_production_state,
+        branch_production_states=branch_production_states,
+        interpolate_production=interpolate_production,
+    )
+    transition_schedule = "linear" if interpolate_production else "step"
+    return simulate_bifurcation(
+        grn,
+        n_trunk_cells=n_trunk_cells,
+        n_branch_cells=n_branch_cells,
+        trunk_time=trunk_time,
+        branch_time=branch_time,
+        dt=dt,
+        beta=beta,
+        gamma=gamma,
+        u0=u0,
+        s0=s0,
+        master_regulators=master_regulators,
+        production_profile=production_profile,
+        master_programs=master_programs,
+        branch_master_programs=branch_master_programs,
+        default_master_alpha=default_master_alpha,
+        target_leak_alpha=target_leak_alpha,
+        alpha_max=alpha_max,
+        seed=seed,
+        noise_seed=noise_seed,
+        capture_rate=capture_rate,
+        poisson_observed=poisson_observed,
+        dropout_rate=dropout_rate,
+        capture_model=capture_model,
+        regulator_activity=regulator_activity,
+        auto_calibrate_half_response=auto_calibrate_half_response,
+        grn_calibration=grn_calibration,
+        return_edge_contributions=return_edge_contributions,
+        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
+        include_branch_initial_state=include_branch_initial_state,
+        allow_snapshot_replacement=allow_snapshot_replacement,
+        alpha_source_mode="state_anchor",
+        trunk_state=trunk_production_state,
+        branch_child_states=branch_production_states,
+        transition_schedule=transition_schedule,
+        profile_gene_policy=profile_gene_policy,
+    )

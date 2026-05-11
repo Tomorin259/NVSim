@@ -118,7 +118,7 @@ def main() -> None:
             selected_lines.append("  incoming_edges:")
             for _, row in edges.iterrows():
                 selected_lines.append(
-                    f"    regulator={row['regulator']} target={row['target']} sign={row['sign']} weight={row['weight']}"
+                    f"    regulator={row['regulator']} target={row['target']} sign={row['sign']} K={row['K']}"
                 )
     (diagnostics_dir / "selected_genes.txt").write_text("\n".join(selected_lines) + "\n", encoding="utf-8")
 

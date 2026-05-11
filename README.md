@@ -61,7 +61,7 @@ The public API follows a flat `nvsim/*.py` layout so the core model is easy to i
 - `nvsim/regulation.py`: SERGIO-style Hill activation/repression and additive target production.
 - `nvsim/production.py`: master-regulator forcing definitions, including time-dependent alpha programs and state/bin-wise production profiles.
 - `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, deterministic ODE integration, snapshot sampling, and result assembly.
-- `nvsim/noise.py`: observed-count generation for `scale_poisson` and `binomial_capture`.
+- `nvsim/noise.py`: observed-count generation for canonical `poisson_capture` and `binomial_capture` models.
 - `nvsim/output.py`: plain dict output and optional AnnData export.
 - `nvsim/plotting.py`: quick-look PCA/UMAP, phase portraits, dynamics, and gallery plots.
 - `nvsim/sergio_io.py`: SERGIO `targets/regs` parser.
@@ -140,8 +140,13 @@ print(result["var"][["gene_role", "gene_class"]].head())
 
 Observed-count generation currently supports:
 
-- `scale_poisson`
+- `poisson_capture`
 - `binomial_capture`
+
+Legacy aliases are still accepted at the low-level noise helper:
+
+- `scale_poisson` -> `poisson_capture`
+- `binomial` -> `binomial_capture`
 
 Metadata such as `grn_calibration` and `noise_config` is stored in the plain result dict and carried into AnnData output.
 
@@ -163,10 +168,8 @@ They can be manually specified, sampled, copied from SERGIO-style bin/cell-type
 production tables, or estimated from external cluster-level TF activity. NVSim
 does not infer them from scRNA-seq by default.
 
-For bifurcation, the legacy production-profile interface
-(`trunk_production_state` + `branch_production_states`) keeps static branch
-states by default, while the recommended state-anchor interface
-(`trunk_state` + `branch_child_states` + `transition_schedule`) makes smooth
+For bifurcation, use the state-anchor interface
+(`trunk_state` + `branch_child_states` + `transition_schedule`) to make smooth
 parent-to-child transitions explicit. `profile_gene_policy="exact"` is the
 default; `profile_gene_policy="subset_fill"` lets missing master regulators use
 `default_master_alpha`.
@@ -192,10 +195,25 @@ If a `StateProductionProfile` is available, `simulate_linear()` and
 - `auto_calibrate_half_response=True`: always recalibrate from the state/bin
   production matrix before simulation.
 
+### Migration Notes
+
+The public API now uses canonical names consistently:
+
+- `capture_model` replaces `noise_model`
+- `poisson_capture` replaces legacy `scale_poisson`
+- `binomial_capture` replaces legacy `binomial`
+- `trunk_state` replaces `trunk_production_state`
+- `branch_child_states` replaces `branch_production_states`
+- `transition_schedule="linear"` replaces `interpolate_production=True`
+- `K` replaces legacy `weight`
+- `half_response` replaces legacy `threshold`
+
+`simulate_bifurcation_legacy()` is still available as a compatibility helper in
+`nvsim.simulate`, but it is intentionally not re-exported from the top-level
+package. New code should call `simulate_bifurcation()` directly.
+
 ### Documentation
 
-- [Current Status](CURRENT_STATUS.md)
-- [Validation Report](VALIDATION_REPORT.md)
 - [Alpha Source Modes](docs/alpha_source_modes.md)
 - [Chinese Model Notes](NVSim_model_cn.md)
 - [Examples Guide](examples/README.md)
@@ -261,7 +279,7 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - `nvsim/regulation.py`：SERGIO 风格 Hill activation/repression 与加性 target production。
 - `nvsim/production.py`：master regulator forcing 定义，包括时间程序和 state/bin production profile。
 - `nvsim/simulate.py`：`beta/gamma` 构造、`u0/s0` 初始状态校验、确定性 ODE 积分、snapshot sampling 和结果装配。
-- `nvsim/noise.py`：`scale_poisson` 与 `binomial_capture` 两类 observed-count 生成。
+- `nvsim/noise.py`：canonical `poisson_capture` 与 `binomial_capture` 两类 observed-count 生成。
 - `nvsim/output.py`：plain dict 输出和可选 AnnData 导出。
 - `nvsim/plotting.py`：PCA/UMAP、phase portrait、dynamics 和缩略图库绘图。
 - `nvsim/sergio_io.py`：SERGIO `targets/regs` 输入解析。
@@ -302,8 +320,13 @@ python examples/plot_bifurcation.py
 
 目前支持两种 observed count generation：
 
-- `scale_poisson`
+- `poisson_capture`
 - `binomial_capture`
+
+为了兼容旧脚本，底层 noise helper 仍接受 legacy alias：
+
+- `scale_poisson` -> `poisson_capture`
+- `binomial` -> `binomial_capture`
 
 同时，`grn_calibration` 和 `noise_config` 会保存在 result dict 中，并在导出 AnnData 时保留下来。
 
@@ -316,7 +339,7 @@ NVSim 现在支持两种 master regulator alpha 来源：
 
 `StateProductionProfile` 是用户提供的 simulation design input。数值可以手写、从 low/high range 采样、来自 SERGIO 风格 bin/cell-type production table，或者从外部 cluster-level TF activity 粗略估计；NVSim 默认不会从 scRNA-seq 自动反推这些 production values。
 
-bifurcation 有两套接口语义：旧接口 `trunk_production_state` + `branch_production_states` 默认让 branch 直接使用 child state，`interpolate_production=True` 才做旧的线性插值；推荐新接口是 `trunk_state` + `branch_child_states` + `transition_schedule`，用于显式描述 parent-to-child regulatory-anchor transition。默认 `profile_gene_policy="exact"`，真实大网络里可用 `profile_gene_policy="subset_fill"` 让缺失 master regulator 使用 `default_master_alpha`。
+bifurcation 使用 `trunk_state` + `branch_child_states` + `transition_schedule`，用于显式描述 parent-to-child regulatory-anchor transition。默认 `profile_gene_policy="exact"`，真实大网络里可用 `profile_gene_policy="subset_fill"` 让缺失 master regulator 使用 `default_master_alpha`。
 
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。
 
@@ -338,10 +361,25 @@ half-response calibration 也不再只能作为单独预处理步骤使用。
 - `auto_calibrate_half_response="if_missing"`：只在缺失 `half_response` 时自动补齐；
 - `auto_calibrate_half_response=True`：在模拟前根据 state/bin production matrix 主动重校准。
 
+### 迁移说明
+
+当前公开 API 已统一使用 canonical 命名：
+
+- `capture_model` 替代 `noise_model`
+- `poisson_capture` 替代旧的 `scale_poisson`
+- `binomial_capture` 替代旧的 `binomial`
+- `trunk_state` 替代 `trunk_production_state`
+- `branch_child_states` 替代 `branch_production_states`
+- `transition_schedule="linear"` 替代 `interpolate_production=True`
+- `K` 替代旧的 `weight`
+- `half_response` 替代旧的 `threshold`
+
+`simulate_bifurcation_legacy()` 仍保留在 `nvsim.simulate` 中，作为兼容
+helper；它不会从顶层包重新导出。新的调用方式应直接使用
+`simulate_bifurcation()`。
+
 ### 相关文档
 
-- [Current Status](CURRENT_STATUS.md)
-- [Validation Report](VALIDATION_REPORT.md)
 - [Alpha Source Modes](docs/alpha_source_modes.md)
 - [Chinese Model Notes](NVSim_model_cn.md)
 - [Examples Guide](examples/README.md)

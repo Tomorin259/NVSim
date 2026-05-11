@@ -10,14 +10,16 @@ NVSim 当前把 SERGIO-style GRN 参数标准化成：
 - half_response
 - hill_coefficient
 
-为了兼容旧接口，``weight`` 作为 ``K`` 的别名保留，``threshold`` 作为
-``half_response`` 的别名保留。
+为了兼容旧接口，``weight`` 作为 ``K`` 的别名、``threshold`` 作为
+``half_response`` 的别名仍然接受，但标准化后的 GRN 内部只保留
+canonical 列名。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -26,8 +28,9 @@ from .config import GRNConfig
 
 REQUIRED_COLUMNS = ("regulator", "target", "sign")
 OPTIONAL_COLUMNS = ("K", "weight", "hill_coefficient", "half_response", "threshold")
-RETURN_COLUMNS = ("regulator", "target", "sign", "K", "weight", "half_response", "threshold", "hill_coefficient")
+RETURN_COLUMNS = ("regulator", "target", "sign", "K", "half_response", "hill_coefficient")
 VALID_SIGNS = {"activation", "repression"}
+LEGACY_GRN_COLUMN_ALIASES = {"weight": "K", "threshold": "half_response"}
 _SIGN_ALIASES = {
     "activation": "activation",
     "activating": "activation",
@@ -85,9 +88,9 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
     输入的 ``edges`` 是 pandas DataFrame。这里会检查必需列、缺失值、
     权重非负、Hill 参数为正，并把 sign 统一成标准字符串。
 
-    返回值仍然是 DataFrame，但列顺序固定。``threshold`` 是旧接口兼容别名，
-    会和 ``half_response`` 保持同步。若 ``half_response`` 缺失，则保留为
-    ``NaN``，留给后续校准流程填充。
+    返回值仍然是 DataFrame，但列顺序固定，且只保留 canonical 列名。
+    ``weight`` / ``threshold`` 仅作为输入兼容别名接受。若
+    ``half_response`` 缺失，则保留为 ``NaN``，留给后续校准流程填充。
     """
 
     config = config or GRNConfig()
@@ -96,6 +99,13 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
         raise ValueError(f"GRN is missing required columns: {missing}")
     if "K" not in edges.columns and "weight" not in edges.columns:
         raise ValueError("GRN must contain either 'K' or 'weight'")
+    for legacy_name, canonical_name in LEGACY_GRN_COLUMN_ALIASES.items():
+        if legacy_name in edges.columns and canonical_name not in edges.columns:
+            warnings.warn(
+                f"GRN column {legacy_name!r} is a legacy alias for {canonical_name!r}; prefer {canonical_name!r}.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     normalized = edges.copy()
     for col in ("regulator", "target"):
@@ -111,35 +121,34 @@ def validate_grn(edges: pd.DataFrame, config: GRNConfig | None = None) -> pd.Dat
         normalized["weight"] = pd.to_numeric(normalized["weight"], errors="raise")
     if "K" not in normalized.columns:
         normalized["K"] = normalized["weight"]
-    if "weight" not in normalized.columns:
-        normalized["weight"] = normalized["K"]
 
     K_values = normalized["K"].to_numpy(dtype=float)
-    weight_values = normalized["weight"].to_numpy(dtype=float)
-    if not np.isfinite(K_values).all() or not np.isfinite(weight_values).all():
-        raise ValueError("GRN K/weight values must be finite")
-    if (K_values < 0).any() or (weight_values < 0).any():
-        raise ValueError("GRN K/weight values must be non-negative; sign controls activation/repression")
-    if not np.allclose(K_values, weight_values):
-        raise ValueError("GRN columns 'K' and 'weight' must match when both are provided")
+    if "weight" in normalized.columns:
+        weight_values = normalized["weight"].to_numpy(dtype=float)
+        if not np.isfinite(weight_values).all():
+            raise ValueError("GRN K/weight values must be finite")
+        if (weight_values < 0).any():
+            raise ValueError("GRN K/weight values must be non-negative; sign controls activation/repression")
+        if not np.allclose(K_values, weight_values):
+            raise ValueError("GRN columns 'K' and 'weight' must match when both are provided")
+    if not np.isfinite(K_values).all():
+        raise ValueError("GRN K values must be finite")
+    if (K_values < 0).any():
+        raise ValueError("GRN K values must be non-negative; sign controls activation/repression")
 
     if "hill_coefficient" not in normalized.columns:
         normalized["hill_coefficient"] = config.default_hill_coefficient
     if "half_response" not in normalized.columns and "threshold" in normalized.columns:
         normalized["half_response"] = normalized["threshold"]
-    if "threshold" not in normalized.columns and "half_response" in normalized.columns:
-        normalized["threshold"] = normalized["half_response"]
     if "half_response" not in normalized.columns:
         normalized["half_response"] = np.nan
-    if "threshold" not in normalized.columns:
-        normalized["threshold"] = normalized["half_response"]
 
     for col in OPTIONAL_COLUMNS:
         if col not in normalized.columns:
             continue
         normalized[col] = pd.to_numeric(normalized[col], errors="raise")
         values = normalized[col].to_numpy(dtype=float)
-        if col in {"K", "weight"}:
+        if col == "K" or col == "weight":
             if not np.isfinite(values).all():
                 raise ValueError(f"GRN column {col!r} must be finite")
             if (values < 0).any():
@@ -296,7 +305,8 @@ def calibrate_half_response(
     This mirrors the key SERGIO idea that each edge's half-response is derived
     from the corresponding regulator's mean expression. If a DataFrame is
     provided, means are computed across rows so columns should be gene ids.
-    ``threshold`` is kept synchronized as a backward-compatible alias.
+    Legacy input column ``threshold`` is accepted, but calibrated outputs only
+    keep canonical ``half_response``.
     """
 
     means = _coerce_mean_expression(regulator_expression)
@@ -311,9 +321,6 @@ def calibrate_half_response(
 
     calibrated = edges.copy()
     calibrated["half_response"] = calibrated["regulator"].map(means).astype(float)
-    calibrated["threshold"] = calibrated["half_response"]
-    calibrated["K"] = calibrated["weight"]
-
     if isinstance(grn, GRN):
         return GRN.from_dataframe(calibrated, genes=grn.genes, master_regulators=grn.master_regulators)
     return calibrated
@@ -418,7 +425,6 @@ def calibrate_grn_thresholds(
         if not np.isfinite(value) or value <= 0:
             value = float(fallback_half_response)
         calibrated.loc[idx, "half_response"] = value
-        calibrated.loc[idx, "threshold"] = value
         filled += 1
 
     metadata = {

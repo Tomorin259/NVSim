@@ -108,15 +108,9 @@ simulate_bifurcation(
 )
 ```
 
-For bifurcation, two API styles are supported:
-
-- Legacy static-state branch: use `trunk_production_state` and
-  `branch_production_states`. By default, each branch directly uses its child
-  state production vector. Set `interpolate_production=True` for the older
-  linear parent-to-child interpolation behavior.
-- Recommended state-anchor branch: use `trunk_state`, `branch_child_states`, and
-  `transition_schedule`. This makes the parent-to-child regulatory-anchor
-  transition explicit and supports `step`, `linear`, and `sigmoid`.
+For bifurcation, use `trunk_state`, `branch_child_states`, and
+`transition_schedule`. This makes the parent-to-child regulatory-anchor
+transition explicit and supports `step`, `linear`, and `sigmoid`.
 
 By default, production-profile columns must exactly match the resolved master
 regulators (`profile_gene_policy="exact"`). For larger real networks, use

@@ -26,9 +26,9 @@ def build_example_grn() -> GRN:
             {
                 "regulator": f"g{reg_idx}",
                 "target": f"g{target_idx}",
-                "weight": 0.4 + 0.02 * target_idx,
+                "K": 0.4 + 0.02 * target_idx,
                 "sign": "activation" if target_idx % 2 == 0 else "repression",
-                "threshold": 0.5,
+                "half_response": 0.5,
                 "hill_coefficient": 2.0,
             }
         )

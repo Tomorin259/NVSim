@@ -290,6 +290,44 @@ def test_bifurcation_state_anchor_requires_existing_states():
         )
 
 
+def test_bifurcation_state_arguments_require_production_profile():
+    with pytest.raises(ValueError, match="state_anchor state arguments require production_profile"):
+        simulate_bifurcation(
+            _small_grn(),
+            trunk_state="progenitor",
+            branch_child_states=("lineage_A", "lineage_B"),
+        )
+
+
+def test_bifurcation_subset_fill_uses_default_for_missing_master_alpha():
+    production = StateProductionProfile(
+        pd.DataFrame(
+            {"g0": [0.4, 1.4, 0.1]},
+            index=["progenitor", "lineage_A", "lineage_B"],
+        )
+    )
+    result = simulate_bifurcation(
+        _small_grn(),
+        n_trunk_cells=6,
+        n_branch_cells={"branch_0": 6, "branch_1": 6},
+        trunk_time=0.8,
+        branch_time=0.8,
+        dt=0.04,
+        production_profile=production,
+        trunk_state="progenitor",
+        branch_child_states=("lineage_A", "lineage_B"),
+        profile_gene_policy="subset_fill",
+        default_master_alpha=0.9,
+        seed=43,
+        poisson_observed=False,
+    )
+
+    segments = result["uns"]["segment_time_courses"]
+    assert np.allclose(segments["trunk"]["alpha"][:, 1], 0.9)
+    assert np.allclose(segments["branch_0"]["alpha"][:, 1], 0.9)
+    assert result["uns"]["simulation_config"]["profile_gene_policy"] == "subset_fill"
+
+
 def test_bifurcation_requires_known_production_states():
     production = StateProductionProfile(pd.DataFrame({"g0": [0.4], "g1": [0.5]}, index=["trunk_state"]))
 

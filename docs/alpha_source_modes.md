@@ -76,6 +76,12 @@ Supported transition schedules are:
 switching can create expression or embedding discontinuities. `linear` is useful
 for simpler sensitivity checks.
 
+`StateProductionProfile` is a simulation design input. Its values can be
+manually specified, sampled from low/high ranges, copied from SERGIO-style
+cell-type/bin production-rate tables, or estimated from external cluster-level
+TF activity. NVSim does not infer these production values from scRNA-seq by
+default.
+
 Linear example:
 
 ```python
@@ -101,6 +107,22 @@ simulate_bifurcation(
     transition_schedule="sigmoid",
 )
 ```
+
+For bifurcation, two API styles are supported:
+
+- Legacy static-state branch: use `trunk_production_state` and
+  `branch_production_states`. By default, each branch directly uses its child
+  state production vector. Set `interpolate_production=True` for the older
+  linear parent-to-child interpolation behavior.
+- Recommended state-anchor branch: use `trunk_state`, `branch_child_states`, and
+  `transition_schedule`. This makes the parent-to-child regulatory-anchor
+  transition explicit and supports `step`, `linear`, and `sigmoid`.
+
+By default, production-profile columns must exactly match the resolved master
+regulators (`profile_gene_policy="exact"`). For larger real networks, use
+`profile_gene_policy="subset_fill"` to provide anchors for only part of the
+master regulators; missing master regulators receive `default_master_alpha`.
+Extra non-master columns remain an error.
 
 ## Relation To SERGIO
 

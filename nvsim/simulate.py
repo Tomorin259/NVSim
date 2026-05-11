@@ -138,6 +138,7 @@ def _resolve_master_genes(
     master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
     production_profile: StateProductionProfile | None = None,
     allow_profile_targets_as_masters: bool = False,
+    profile_gene_policy: str = "exact",
 ) -> tuple[tuple[str, ...], dict[str, object]]:
     explicit_provided = master_regulators is not None
     grn_metadata_provided = grn.master_regulators is not None
@@ -147,7 +148,7 @@ def _resolve_master_genes(
     elif grn.master_regulators is not None:
         masters = tuple(str(gene) for gene in grn.master_regulators)
         source = "grn_metadata"
-    elif production_profile is not None:
+    elif production_profile is not None and profile_gene_policy == "exact":
         masters = tuple(str(gene) for gene in production_profile.genes)
         source = "production_profile"
     else:
@@ -190,6 +191,7 @@ def _resolve_alpha_source_mode(
     production_state: str | None = None,
     parent_state: str | None = None,
     child_state: str | None = None,
+    state_args_present: bool = False,
 ) -> str:
     """Resolve the master-regulator alpha source mode.
 
@@ -197,11 +199,18 @@ def _resolve_alpha_source_mode(
     ``state_anchor`` uses SERGIO-style state/bin production anchors.
     """
 
+    state_args_present = state_args_present or any(
+        value is not None for value in (production_state, parent_state, child_state)
+    )
     allowed = {"continuous_program", "state_anchor"}
     if alpha_source_mode is not None:
         if alpha_source_mode not in allowed:
             raise ValueError("alpha_source_mode must be 'continuous_program' or 'state_anchor'")
+        if state_args_present and alpha_source_mode != "state_anchor":
+            raise ValueError("state_anchor state arguments require alpha_source_mode='state_anchor'")
         return alpha_source_mode
+    if state_args_present:
+        return "state_anchor"
     if production_profile is not None:
         return "state_anchor"
     return "continuous_program"
@@ -243,6 +252,51 @@ def _resolve_noise_model_name(noise_model: str | None, capture_model: str | None
     return alias_map[model]
 
 
+def _validate_profile_genes(
+    production_profile: StateProductionProfile,
+    master_genes: tuple[str, ...],
+    profile_gene_policy: str,
+) -> None:
+    if profile_gene_policy == "exact":
+        production_profile.validate_master_genes(master_genes)
+        return
+    if profile_gene_policy != "subset_fill":
+        raise ValueError("profile_gene_policy must be 'exact' or 'subset_fill'")
+    expected = {str(gene) for gene in master_genes}
+    observed = set(production_profile.genes)
+    extra = sorted(observed - expected)
+    if extra:
+        raise ValueError("production profile genes do not match master genes: extra=" + str(extra))
+
+
+def _complete_source_alpha(
+    alpha: pd.Series,
+    genes: tuple[str, ...],
+    master_genes: tuple[str, ...],
+    default_master_alpha: float,
+    profile_gene_policy: str,
+) -> pd.Series:
+    completed = pd.Series(0.0, index=pd.Index(genes, name="gene"), dtype=float)
+    completed.update(alpha.astype(float))
+    if profile_gene_policy == "subset_fill":
+        missing_masters = [gene for gene in master_genes if gene not in alpha.index]
+        if missing_masters:
+            completed.loc[missing_masters] = float(default_master_alpha)
+    return completed
+
+
+def _source_alpha_from_profile(
+    production_profile: StateProductionProfile,
+    state: str,
+    genes: tuple[str, ...],
+    master_genes: tuple[str, ...],
+    default_master_alpha: float,
+    profile_gene_policy: str,
+) -> pd.Series:
+    alpha = production_profile.source_alpha(state)
+    return _complete_source_alpha(alpha, genes, master_genes, default_master_alpha, profile_gene_policy)
+
+
 def _state_transition_source_alpha_fn(
     production_profile: StateProductionProfile,
     parent_state: str,
@@ -250,6 +304,9 @@ def _state_transition_source_alpha_fn(
     segment_start_time: float,
     segment_time: float,
     genes: tuple[str, ...],
+    master_genes: tuple[str, ...],
+    default_master_alpha: float,
+    profile_gene_policy: str,
     transition_schedule: str,
     transition_midpoint: float,
     transition_steepness: float,
@@ -261,15 +318,15 @@ def _state_transition_source_alpha_fn(
             fraction = 1.0
         else:
             fraction = float(np.clip((global_t - segment_start_time) / segment_time, 0.0, 1.0))
-        return production_profile.source_alpha_transition(
+        alpha = production_profile.source_alpha_transition(
             parent_state,
             child_state,
             fraction,
             schedule=transition_schedule,
             midpoint=transition_midpoint,
             steepness=transition_steepness,
-            genes=genes,
         )
+        return _complete_source_alpha(alpha, genes, master_genes, default_master_alpha, profile_gene_policy)
 
     return resolve
 
@@ -794,6 +851,9 @@ def _branch_source_alpha_fn(
     trunk_time: float,
     branch_time: float,
     genes: tuple[str, ...],
+    master_genes: tuple[str, ...],
+    default_master_alpha: float,
+    profile_gene_policy: str,
 ) -> Callable[[float], pd.Series]:
     """Backward-compatible branch interpolation helper using a linear schedule."""
 
@@ -804,6 +864,9 @@ def _branch_source_alpha_fn(
         trunk_time,
         branch_time,
         genes,
+        master_genes,
+        default_master_alpha,
+        profile_gene_policy,
         "linear",
         0.5,
         10.0,
@@ -863,6 +926,7 @@ def simulate_linear(
     transition_schedule: str = "sigmoid",
     transition_midpoint: float = 0.5,
     transition_steepness: float = 10.0,
+    profile_gene_policy: str = "exact",
 ) -> dict:
     """Simulate a linear GRN-aware RNA velocity trajectory.
 
@@ -890,6 +954,7 @@ def simulate_linear(
         master_regulators=master_regulators,
         production_profile=production_profile,
         allow_profile_targets_as_masters=allow_profile_targets_as_masters,
+        profile_gene_policy=profile_gene_policy,
     )
     resolved_alpha_source_mode = _resolve_alpha_source_mode(
         alpha_source_mode,
@@ -902,8 +967,8 @@ def simulate_linear(
     source_alpha_fn = None
     if resolved_alpha_source_mode == "state_anchor":
         if production_profile is None:
-            raise ValueError("production_profile must be provided when alpha_source_mode='state_anchor'")
-        production_profile.validate_master_genes(master_genes)
+            raise ValueError("state_anchor state arguments require production_profile")
+        _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
         if parent_state is not None or child_state is not None:
             if parent_state is None or child_state is None:
                 raise ValueError("parent_state and child_state must be provided together for state_anchor transitions")
@@ -915,6 +980,9 @@ def simulate_linear(
                 0.0,
                 time_end,
                 grn.genes,
+                master_genes,
+                default_master_alpha,
+                profile_gene_policy,
                 transition_schedule,
                 transition_midpoint,
                 transition_steepness,
@@ -934,7 +1002,14 @@ def simulate_linear(
         target_leak_alpha=target_leak_alpha,
     )
     if resolved_alpha_source_mode == "state_anchor" and source_alpha_fn is None:
-        source_alpha = production_profile.source_alpha(production_state, genes=grn.genes)
+        source_alpha = _source_alpha_from_profile(
+            production_profile,
+            production_state,
+            grn.genes,
+            master_genes,
+            default_master_alpha,
+            profile_gene_policy,
+        )
 
     segment = _simulate_segment(
         grn=grn,
@@ -1024,6 +1099,7 @@ def simulate_linear(
         "production_profile_states": list(production_profile.states) if production_profile is not None else None,
         "production_profile_master_genes": list(production_profile.genes) if production_profile is not None else None,
         "production_state": production_state,
+        "profile_gene_policy": profile_gene_policy if resolved_alpha_source_mode == "state_anchor" else None,
         "parent_state": parent_state,
         "child_state": child_state,
         "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
@@ -1116,6 +1192,7 @@ def simulate_bifurcation(
     transition_schedule: str = "sigmoid",
     transition_midpoint: float = 0.5,
     transition_steepness: float = 10.0,
+    profile_gene_policy: str = "exact",
 ) -> dict:
     """Simulate a trunk-to-two-branch RNA velocity trajectory.
 
@@ -1146,6 +1223,7 @@ def simulate_bifurcation(
         master_regulators=master_regulators,
         production_profile=production_profile,
         allow_profile_targets_as_masters=allow_profile_targets_as_masters,
+        profile_gene_policy=profile_gene_policy,
     )
     resolved_trunk_state = trunk_state if trunk_state is not None else trunk_production_state
     resolved_branch_child_states = _resolve_branch_child_states(branch_child_states, branch_production_states, branch_labels)
@@ -1153,6 +1231,7 @@ def simulate_bifurcation(
         alpha_source_mode,
         production_profile=production_profile,
         production_state=resolved_trunk_state,
+        state_args_present=branch_child_states is not None or branch_production_states is not None,
     )
     use_anchor_transition = alpha_source_mode == "state_anchor" or branch_child_states is not None
     trunk_source_alpha = None
@@ -1160,12 +1239,12 @@ def simulate_bifurcation(
     branch_source_alpha_fns: dict[str, Callable[[float], pd.Series]] = {}
     if resolved_alpha_source_mode == "state_anchor":
         if production_profile is None:
-            raise ValueError("production_profile must be provided when alpha_source_mode='state_anchor'")
+            raise ValueError("state_anchor state arguments require production_profile")
         if resolved_trunk_state is None:
             raise ValueError("trunk_state or trunk_production_state must be provided for state_anchor bifurcation")
         if resolved_branch_child_states is None:
             raise ValueError("branch_child_states or branch_production_states must be provided for state_anchor bifurcation")
-        production_profile.validate_master_genes(master_genes)
+        _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
         production_profile.validate_states(
             [resolved_trunk_state, *(resolved_branch_child_states[branch] for branch in branch_labels)]
         )
@@ -1180,7 +1259,14 @@ def simulate_bifurcation(
         target_leak_alpha=target_leak_alpha,
     )
     if resolved_alpha_source_mode == "state_anchor":
-        trunk_source_alpha = production_profile.source_alpha(resolved_trunk_state, genes=grn.genes)
+        trunk_source_alpha = _source_alpha_from_profile(
+            production_profile,
+            resolved_trunk_state,
+            grn.genes,
+            master_genes,
+            default_master_alpha,
+            profile_gene_policy,
+        )
         for branch in branch_labels:
             child_state = resolved_branch_child_states[branch]
             if use_anchor_transition:
@@ -1191,6 +1277,9 @@ def simulate_bifurcation(
                     trunk_time,
                     branch_time,
                     grn.genes,
+                    master_genes,
+                    default_master_alpha,
+                    profile_gene_policy,
                     transition_schedule,
                     transition_midpoint,
                     transition_steepness,
@@ -1203,9 +1292,19 @@ def simulate_bifurcation(
                     trunk_time,
                     branch_time,
                     grn.genes,
+                    master_genes,
+                    default_master_alpha,
+                    profile_gene_policy,
                 )
             else:
-                branch_source_alpha[branch] = production_profile.source_alpha(child_state, genes=grn.genes)
+                branch_source_alpha[branch] = _source_alpha_from_profile(
+                    production_profile,
+                    child_state,
+                    grn.genes,
+                    master_genes,
+                    default_master_alpha,
+                    profile_gene_policy,
+                )
 
     total_program_time = trunk_time + branch_time
     branch_divergence_source = "none"
@@ -1399,6 +1498,7 @@ def simulate_bifurcation(
         "trunk_production_state": trunk_production_state,
         "branch_child_states": dict(resolved_branch_child_states) if resolved_branch_child_states is not None else None,
         "branch_production_states": dict(branch_production_states) if branch_production_states is not None else None,
+        "profile_gene_policy": profile_gene_policy if resolved_alpha_source_mode == "state_anchor" else None,
         "transition_schedule": transition_schedule if use_anchor_transition else ("linear" if interpolate_production else "step"),
         "transition_midpoint": transition_midpoint if use_anchor_transition else None,
         "transition_steepness": transition_steepness if use_anchor_transition else None,

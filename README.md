@@ -158,6 +158,19 @@ NVSim supports two master-regulator alpha source modes:
   `sigmoid` is recommended for differentiation-like trajectories because it
   avoids hard production-rate jumps.
 
+`StateProductionProfile` values are user-supplied simulation design inputs.
+They can be manually specified, sampled, copied from SERGIO-style bin/cell-type
+production tables, or estimated from external cluster-level TF activity. NVSim
+does not infer them from scRNA-seq by default.
+
+For bifurcation, the legacy production-profile interface
+(`trunk_production_state` + `branch_production_states`) keeps static branch
+states by default, while the recommended state-anchor interface
+(`trunk_state` + `branch_child_states` + `transition_schedule`) makes smooth
+parent-to-child transitions explicit. `profile_gene_policy="exact"` is the
+default; `profile_gene_policy="subset_fill"` lets missing master regulators use
+`default_master_alpha`.
+
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
 
 NVSim uses SERGIO-style additive Hill regulation, but the default
@@ -300,6 +313,10 @@ NVSim 现在支持两种 master regulator alpha 来源：
 
 - `continuous_program`：原有 NVSim 模式。master regulator alpha 是连续时间函数，即 `alpha_m(t) = f_m(t)`，适合干净、机制可控的 pseudotime velocity benchmark。
 - `state_anchor`：借鉴 SERGIO 的 state/bin production 设计。每个 state/bin/cell type 有一套 master-regulator production vector；transition 时可以用 `step`、`linear` 或 `sigmoid` 从 parent state 平滑过渡到 child state。分化轨迹默认推荐 `sigmoid`，避免 hard switching 造成表达或 embedding 断裂。
+
+`StateProductionProfile` 是用户提供的 simulation design input。数值可以手写、从 low/high range 采样、来自 SERGIO 风格 bin/cell-type production table，或者从外部 cluster-level TF activity 粗略估计；NVSim 默认不会从 scRNA-seq 自动反推这些 production values。
+
+bifurcation 有两套接口语义：旧接口 `trunk_production_state` + `branch_production_states` 默认让 branch 直接使用 child state，`interpolate_production=True` 才做旧的线性插值；推荐新接口是 `trunk_state` + `branch_child_states` + `transition_schedule`，用于显式描述 parent-to-child regulatory-anchor transition。默认 `profile_gene_policy="exact"`，真实大网络里可用 `profile_gene_policy="subset_fill"` 让缺失 master regulator 使用 `default_master_alpha`。
 
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。
 

@@ -343,6 +343,52 @@ def test_linear_simulation_requires_state_for_production_profile():
         simulate_linear(grn, production_profile=production)
 
 
+def test_linear_state_arguments_require_production_profile():
+    grn = _small_grn()
+
+    with pytest.raises(ValueError, match="state_anchor state arguments require production_profile"):
+        simulate_linear(grn, parent_state="progenitor", child_state="lineage_A")
+
+
+def test_profile_gene_policy_subset_fill_uses_default_for_missing_masters():
+    grn = _small_grn()
+    production = StateProductionProfile(pd.DataFrame({"g0": [1.25]}, index=["bin_0"]))
+    result = simulate_linear(
+        grn,
+        n_cells=5,
+        time_end=1.0,
+        dt=0.25,
+        production_profile=production,
+        production_state="bin_0",
+        profile_gene_policy="subset_fill",
+        default_master_alpha=0.9,
+        seed=17,
+        poisson_observed=False,
+    )
+
+    assert result["uns"]["simulation_config"]["profile_gene_policy"] == "subset_fill"
+    assert np.allclose(result["layers"]["true_alpha"][:, 0], 1.25)
+    assert np.allclose(result["layers"]["true_alpha"][:, 1], 0.9)
+
+
+def test_profile_gene_policy_subset_fill_rejects_non_master_columns():
+    grn = _small_grn()
+    production = StateProductionProfile(pd.DataFrame({"g0": [1.25], "g2": [0.5]}, index=["bin_0"]))
+
+    with pytest.raises(ValueError, match="extra"):
+        simulate_linear(
+            grn,
+            n_cells=5,
+            time_end=1.0,
+            dt=0.25,
+            production_profile=production,
+            production_state="bin_0",
+            profile_gene_policy="subset_fill",
+            seed=17,
+            poisson_observed=False,
+        )
+
+
 def test_linear_simulation_still_requires_half_response_without_auto_calibration():
     grn = _small_grn_missing_half_response()
     production = StateProductionProfile(pd.DataFrame({"g0": [1.0], "g1": [1.0]}, index=["bin_0"]))

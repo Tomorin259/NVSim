@@ -21,9 +21,14 @@ These are the supported example workflows.
 
 ### Data generation
 
-- `run_mvp_linear.py`: builds a 20-gene linear GRN-aware RNA velocity dataset.
-- `run_mvp_bifurcation.py`: builds a trunk-to-two-branch dataset with
+- `run_linear_continuous_program.py`: canonical linear example for
+  `alpha_source_mode="continuous_program"`.
+- `run_bifurcation_state_anchor.py`: canonical bifurcation example for
+  `alpha_source_mode="state_anchor"`.
+- `run_mvp_linear.py`: compact 20-gene linear smoke example.
+- `run_mvp_bifurcation.py`: compact trunk-to-two-branch smoke example with
   continuous master-regulator programs.
+- `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
 
 ### Plotting
 
@@ -40,9 +45,10 @@ gene phase portraits.
 
 ```bash
 python examples/tutorial.py
-python examples/run_mvp_linear.py
-python examples/run_mvp_bifurcation.py
+python examples/run_linear_continuous_program.py
+python examples/run_bifurcation_state_anchor.py
 python examples/plot_velocity_showcase.py
+python examples/run_trrust_mouse_small.py
 ```
 
 ## Output Naming
@@ -50,8 +56,13 @@ python examples/plot_velocity_showcase.py
 Current generated output groups are:
 
 - `examples/outputs/tutorial/`: tutorial linear and bifurcation outputs.
+- `examples/outputs/linear_continuous_program/`: canonical linear continuous
+  master-program example.
+- `examples/outputs/bifurcation_state_anchor/`: canonical bifurcation
+  state-anchor example.
 - `examples/outputs/linear_20gene/`: small linear MVP sanity dataset.
 - `examples/outputs/bifurcation_20gene_3master/`: small hand-built GRN
   bifurcation dataset.
 - `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
   showcase plots.
+- `examples/outputs/trrust_mouse_small/`: external TRRUST benchmark outputs.

@@ -57,7 +57,7 @@ Here:
 
 The public API follows a flat `nvsim/*.py` layout so the core model is easy to inspect.
 
-- `nvsim/grn.py`: GRN schema, master-regulator detection, graph levels, and threshold calibration helpers.
+- `nvsim/grn.py`: GRN schema, master-regulator detection, graph levels, and half-response calibration helpers.
 - `nvsim/regulation.py`: SERGIO-style Hill activation/repression and additive target production.
 - `nvsim/production.py`: master-regulator forcing definitions, including time-dependent alpha programs and state/bin-wise production profiles.
 - `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, deterministic ODE integration, snapshot sampling, and result assembly.
@@ -215,9 +215,10 @@ Recommended entry points:
 
 ```bash
 python examples/tutorial.py
-python examples/run_mvp_linear.py
-python examples/run_mvp_bifurcation.py
+python examples/run_linear_continuous_program.py
+python examples/run_bifurcation_state_anchor.py
 python examples/plot_velocity_showcase.py
+python examples/run_trrust_mouse_small.py
 ```
 
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
@@ -242,7 +243,6 @@ package. New code should call `simulate_bifurcation()` directly.
 ### Documentation
 
 - [Alpha Source Modes](docs/alpha_source_modes.md)
-- [Chinese Model Notes](NVSim_model_cn.md)
 - [Examples Guide](examples/README.md)
 
 ---
@@ -302,7 +302,7 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 
 当前公开 API 采用扁平的 `nvsim/*.py` 布局，便于直接按模块阅读：
 
-- `nvsim/grn.py`：GRN schema、master regulator 识别、graph level 和 threshold calibration helper。
+- `nvsim/grn.py`：GRN schema、master regulator 识别、graph level 和 half-response calibration helper。
 - `nvsim/regulation.py`：SERGIO 风格 Hill activation/repression 与加性 target production。
 - `nvsim/production.py`：master regulator forcing 定义，包括时间程序和 state/bin production profile。
 - `nvsim/simulate.py`：`beta/gamma` 构造、`u0/s0` 初始状态校验、确定性 ODE 积分、snapshot sampling 和结果装配。
@@ -420,9 +420,10 @@ trunk 加两条子分支用 `simulate_bifurcation()`。
 
 ```bash
 python examples/tutorial.py
-python examples/run_mvp_linear.py
-python examples/run_mvp_bifurcation.py
+python examples/run_linear_continuous_program.py
+python examples/run_bifurcation_state_anchor.py
 python examples/plot_velocity_showcase.py
+python examples/run_trrust_mouse_small.py
 ```
 
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。
@@ -447,5 +448,4 @@ helper；它不会从顶层包重新导出。新的调用方式应直接使用
 ### 相关文档
 
 - [Alpha Source Modes](docs/alpha_source_modes.md)
-- [Chinese Model Notes](NVSim_model_cn.md)
 - [Examples Guide](examples/README.md)

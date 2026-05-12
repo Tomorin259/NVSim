@@ -39,6 +39,13 @@ These are the supported example workflows.
 - `plot_bifurcation.py`: generates quick-look figures under
   `examples/outputs/bifurcation_20gene_3master/plots/` and writes
   `diagnostics/selected_genes.txt`.
+- `plot_velocity_showcase.py`: uses scanpy/scVelo to generate RNA
+  velocity-style showcase figures under `examples/outputs/velocity_showcase/`.
+  This script requires the optional `velocity` dependencies.
+
+`nvsim.plotting` remains the lightweight diagnostics layer for quick PCA,
+phase portraits, and gene dynamics. `nvsim.velocity_plotting` is the higher
+level scanpy/scVelo workflow for publication-style velocity panels.
 
 ## Recommended Check Commands
 
@@ -50,6 +57,12 @@ python examples/run_mvp_bifurcation.py
 python examples/plot_bifurcation.py
 python examples/run_linear_continuous_program.py
 python examples/run_bifurcation_state_anchor.py
+```
+
+Optional velocity showcase command, requiring scanpy and scVelo:
+
+```bash
+python examples/plot_velocity_showcase.py
 ```
 
 ## Output Naming
@@ -64,5 +77,7 @@ Current generated output groups are:
   program example.
 - `examples/outputs/bifurcation_state_anchor/`: state-anchor bifurcation
   example.
+- `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
+  showcase plots.
 - `examples/outputs/trrust_mouse_small/`: external TRRUST mouse benchmark
   example.

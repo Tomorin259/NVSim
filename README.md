@@ -63,7 +63,8 @@ The public API follows a flat `nvsim/*.py` layout so the core model is easy to i
 - `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, deterministic ODE integration, snapshot sampling, and result assembly.
 - `nvsim/noise.py`: observed-count generation for canonical `poisson_capture` and `binomial_capture` models.
 - `nvsim/output.py`: plain dict output and optional AnnData export.
-- `nvsim/plotting.py`: quick-look PCA/UMAP, phase portraits, dynamics, and gallery plots.
+- `nvsim/plotting.py`: lightweight quick-look diagnostics with minimal dependencies.
+- `nvsim/velocity_plotting.py`: scanpy/scVelo RNA velocity-style showcase workflow.
 - `nvsim/sergio_io.py`: SERGIO `targets/regs` parser.
 
 ### Install
@@ -78,6 +79,12 @@ Development install:
 
 ```bash
 pip install -e .[dev]
+```
+
+Velocity showcase plotting additionally uses scanpy and scVelo:
+
+```bash
+pip install -e .[velocity]
 ```
 
 ### Public API Walkthrough
@@ -219,6 +226,12 @@ python examples/run_mvp_bifurcation.py
 python examples/plot_bifurcation.py
 ```
 
+For scanpy/scVelo RNA velocity-style visualization:
+
+```bash
+python examples/plot_velocity_showcase.py
+```
+
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
 
 ### Migration Notes
@@ -308,6 +321,7 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - `nvsim/noise.py`：canonical `poisson_capture` 与 `binomial_capture` 两类 observed-count 生成。
 - `nvsim/output.py`：plain dict 输出和可选 AnnData 导出。
 - `nvsim/plotting.py`：PCA/UMAP、phase portrait、dynamics 和缩略图库绘图。
+- `nvsim/velocity_plotting.py`：基于 scanpy/scVelo 的 velocity showcase workflow。
 - `nvsim/sergio_io.py`：SERGIO `targets/regs` 输入解析。
 
 ### 安装

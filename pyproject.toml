@@ -18,6 +18,7 @@ dependencies = [
 anndata = ["anndata"]
 umap = ["umap-learn"]
 plotting = ["umap-learn"]
+velocity = ["scanpy", "scvelo"]
 dev = ["pytest", "anndata", "umap-learn"]
 
 [tool.setuptools.packages.find]

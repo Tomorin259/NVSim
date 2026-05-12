@@ -44,6 +44,13 @@ from .plotting import (
     plot_phase_portrait_gallery,
     select_representative_genes_by_dynamics,
 )
+from .velocity_plotting import (
+    plot_velocity_showcase,
+    prepare_velocity_adata,
+    run_scanpy_embedding,
+    run_scvelo_velocity_stream,
+    select_velocity_showcase_genes,
+)
 
 __all__ = [
     "GRN",
@@ -84,4 +91,9 @@ __all__ = [
     "plot_phase_portrait_gallery",
     "plot_gene_dynamics_over_pseudotime",
     "select_representative_genes_by_dynamics",
+    "prepare_velocity_adata",
+    "run_scanpy_embedding",
+    "run_scvelo_velocity_stream",
+    "select_velocity_showcase_genes",
+    "plot_velocity_showcase",
 ]

@@ -27,6 +27,14 @@ def _is_anndata(obj: Any) -> bool:
     return hasattr(obj, "layers") and hasattr(obj, "obs") and hasattr(obj, "var")
 
 
+def _as_anndata(data: Any, *, copy: bool = True):
+    if _is_anndata(data):
+        return data.copy() if copy else data
+    if isinstance(data, dict):
+        return to_anndata(data)
+    raise TypeError("data must be an NVSim result dict or AnnData")
+
+
 def _dense_array(value: Any, *, name: str) -> np.ndarray:
     if hasattr(value, "toarray"):
         value = value.toarray()
@@ -328,10 +336,11 @@ def plot_gene_dynamics(
     genes: Iterable[str] | str,
     output_path: str | Path | None = None,
     quantities: tuple[str, ...] = ("true_alpha", "true_unspliced", "true_spliced", "true_velocity", "true_velocity_u"),
+    dpi: int = 180,
 ):
     """Plot selected gene quantities over pseudotime, grouped by branch."""
 
-    adata = prepare_adata(data, expression_layer="true") if not _is_anndata(data) else data.copy()
+    adata = _as_anndata(data, copy=True)
     gene_list = [genes] if isinstance(genes, (str, int)) else list(genes)
     names = [str(name) for name in adata.var_names]
     pt = adata.obs["pseudotime"].to_numpy(dtype=float) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
@@ -363,7 +372,7 @@ def plot_gene_dynamics(
     if output_path is not None:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(path, dpi=180, bbox_inches="tight")
+        fig.savefig(path, dpi=dpi, bbox_inches="tight")
     return fig
 
 
@@ -380,33 +389,7 @@ def plot_phase_portrait_gallery(*args, **kwargs):
 
 
 def _plot_gene_dynamics(adata: Any, genes: Iterable[str], output_path: Path, dpi: int) -> None:
-    genes = list(genes)
-    layers = [("true_alpha", "alpha"), ("true_spliced", "spliced"), ("velocity", "velocity")]
-    pt = adata.obs["pseudotime"].to_numpy(dtype=float) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
-    branch = adata.obs["branch"].astype(str).to_numpy() if "branch" in adata.obs else np.array(["all"] * adata.n_obs)
-    fig, axes = plt.subplots(len(genes), len(layers), figsize=(4.0 * len(layers), 2.3 * len(genes)), squeeze=False)
-    for row, gene in enumerate(genes):
-        idx = list(map(str, adata.var_names)).index(str(gene))
-        for col, (layer, label) in enumerate(layers):
-            ax = axes[row, col]
-            if layer not in adata.layers:
-                ax.text(0.5, 0.5, f"missing {layer}", ha="center", va="center")
-                ax.set_axis_off()
-                continue
-            values = np.asarray(adata.layers[layer], dtype=float)[:, idx]
-            for category in pd.unique(branch):
-                mask = branch == category
-                order = np.argsort(pt[mask])
-                ax.plot(pt[mask][order], values[mask][order], ".", markersize=3, alpha=0.75, label=category)
-            if row == 0:
-                ax.set_title(label)
-            if col == 0:
-                ax.set_ylabel(f"{gene}")
-            if row == len(genes) - 1:
-                ax.set_xlabel("pseudotime")
-    handles, labels = axes[0, 0].get_legend_handles_labels()
-    if handles:
-        axes[0, -1].legend(handles, labels, frameon=False, fontsize=8)
+    fig = plot_gene_dynamics(adata, list(genes), output_path=None, dpi=dpi)
     fig.suptitle("Representative gene dynamics")
     fig.tight_layout()
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
@@ -443,7 +426,7 @@ def plot_phase_portrait(
     arrows use ``dx=true_velocity=ds/dt`` and ``dy=true_velocity_u=du/dt``.
     """
 
-    adata = prepare_adata(data, expression_layer="true") if not _is_anndata(data) else data.copy()
+    adata = _as_anndata(data, copy=True)
     names = [str(name) for name in adata.var_names]
     idx = int(gene) if isinstance(gene, int) else names.index(str(gene))
     s, u, ds, du = _phase_layers(adata, mode=mode)
@@ -501,7 +484,7 @@ def plot_phase_gallery(
 ):
     """Plot a thumbnail grid of gene phase portraits."""
 
-    adata = prepare_adata(data, expression_layer="true") if not _is_anndata(data) else data.copy()
+    adata = _as_anndata(data, copy=True)
     gene_names = [str(g) for g in adata.var_names] if genes is None else [str(g) for g in genes]
     if not gene_names:
         raise ValueError("at least one gene is required")

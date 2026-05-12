@@ -18,7 +18,7 @@ The implementation is intentionally smaller than SERGIO, VeloSim, dyngen, or scV
 - `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, RK4 ODE integration, linear simulation, bifurcation simulation, snapshot sampling, true and observed layer assembly.
 - `nvsim/noise.py`: observed layer generation with capture scaling, optional Poisson sampling, optional VeloSim-style binomial capture, and optional dropout.
 - `nvsim/output.py`: plain dictionary output and optional AnnData export.
-- `nvsim/plotting.py`: matplotlib-only PCA/UMAP embeddings, velocity quick-look arrows, phase portraits, gene dynamics, and bifurcation representative-gene selection by alpha divergence.
+- `nvsim/plotting.py`: scanpy/scVelo-based velocity showcase plots plus NVSim-specific phase portraits, gene dynamics, and representative-gene selection.
 - `nvsim/config.py`: lightweight dataclass configuration defaults.
 
 ## Repository Layout

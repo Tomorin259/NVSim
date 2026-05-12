@@ -15,6 +15,7 @@ from nvsim.plotting import (
     prepare_adata,
     select_genes,
 )
+from nvsim.velocity_plotting import prepare_velocity_adata
 from nvsim.production import linear_decrease, linear_increase
 from nvsim.simulate import simulate_bifurcation, simulate_linear
 
@@ -117,6 +118,19 @@ def test_phase_portrait_uses_two_dimensional_gene_velocity(tmp_path: Path):
     assert "true_velocity_u" in adata.layers
 
 
+def test_observed_phase_portrait_uses_observed_layers():
+    result = _linear_result()
+    result["layers"]["spliced"] = result["layers"]["true_spliced"] + 100.0
+    result["layers"]["unspliced"] = result["layers"]["true_unspliced"] + 200.0
+
+    fig = plot_phase_portrait(result, "g0", mode="observed", show_velocity=False)
+    offsets = np.asarray(fig.axes[0].collections[0].get_offsets(), dtype=float)
+    plt.close(fig)
+
+    assert np.allclose(offsets[:, 0], result["layers"]["spliced"][:, 0])
+    assert np.allclose(offsets[:, 1], result["layers"]["unspliced"][:, 0])
+
+
 def test_phase_gallery_and_gene_dynamics_save_files(tmp_path: Path):
     result = _linear_result()
     paths = [
@@ -126,6 +140,7 @@ def test_phase_gallery_and_gene_dynamics_save_files(tmp_path: Path):
     fig = plot_phase_gallery(result, genes=["g0", "g1"], mode="true", max_cols=2, output_path=paths[0])
     plt.close(fig)
     fig = plot_gene_dynamics(result, genes=["g0", "g1"], output_path=paths[1])
+    assert len(fig.axes) == 10
     plt.close(fig)
 
     for path in paths:
@@ -139,3 +154,10 @@ def test_select_genes_returns_valid_representatives():
 
     assert 3 <= len(selected) <= 4
     assert set(selected).issubset(set(map(str, adata.var_names)))
+
+
+def test_velocity_plotting_compatibility_shim_still_imports():
+    result = _linear_result()
+    adata = prepare_velocity_adata(result, expression_layer="true")
+
+    assert np.allclose(adata.X, result["layers"]["true_spliced"])

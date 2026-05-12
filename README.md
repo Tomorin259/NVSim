@@ -80,46 +80,83 @@ Development install:
 pip install -e .[dev]
 ```
 
-### Quick Start
+### Public API Walkthrough
 
-Run the small linear example:
+#### 1. Define GRN
 
-```bash
-python examples/run_mvp_linear.py
-python examples/plot_linear.py
-```
+Define a GRN as a DataFrame with canonical columns:
 
-Run the bifurcation example:
+- `regulator`
+- `target`
+- `sign`
+- `K`
+- `half_response`
+- `hill_coefficient`
 
-```bash
-python examples/run_mvp_bifurcation.py
-python examples/plot_bifurcation.py
-```
-
-Minimal Python usage:
+Minimal example:
 
 ```python
 import pandas as pd
 
 from nvsim.grn import GRN
-from nvsim.production import StateProductionProfile
-from nvsim.simulate import simulate_linear
 
 edges = pd.DataFrame(
     {
         "regulator": ["g0"],
         "target": ["g1"],
-        "K": [0.8],
         "sign": ["activation"],
+        "K": [0.8],
         "half_response": [0.5],
         "hill_coefficient": [2.0],
     }
 )
 
 grn = GRN.from_dataframe(edges, genes=["g0", "g1"])
+```
+
+Use `sign="activation"` / `"repression"` for readability. `+` / `-` are also accepted at input time.
+
+#### 2. Choose Alpha Source
+
+NVSim supports two master-regulator alpha source modes:
+
+- `continuous_program`: the original NVSim mode. Master-regulator alpha is a time function, `alpha_m(t) = f_m(t)`. Use this for clean, controlled pseudotime benchmarks.
+- `state_anchor`: a SERGIO-inspired mode. Each state/bin/cell type has a master-regulator production vector, and transitions can interpolate from a parent state to a child state with `step`, `linear`, or `sigmoid` schedules.
+
+`StateProductionProfile` values are user-supplied simulation design inputs. They can be hand-written, sampled, copied from SERGIO-style production tables, or estimated from external cluster-level TF activity.
+
+For bifurcation with `state_anchor`, use:
+
+- `trunk_state`
+- `branch_child_states`
+- `transition_schedule`
+
+`transition_schedule="sigmoid"` is usually the best default for differentiation-like trajectories because it avoids hard alpha jumps.
+
+Regulatory contributions can choose which RNA state is treated as regulator activity:
+
+- Recommended default: `regulator_activity="spliced"`
+- For SERGIO-style dynamic comparison: `regulator_activity="unspliced"`
+- For sensitivity analysis: compare `"spliced"`, `"unspliced"`, and `"total"`
+
+If a `StateProductionProfile` is available, half-response calibration can run inside simulation:
+
+- `auto_calibrate_half_response=False` (default): keep explicit values
+- `auto_calibrate_half_response="if_missing"`: fill missing `half_response` only
+- `auto_calibrate_half_response=True`: always recalibrate before simulation
+
+#### 3. Choose Trajectory
+
+Use `simulate_linear()` for a single continuous trajectory:
+
+```python
+from nvsim.production import StateProductionProfile
+from nvsim.simulate import simulate_linear
+
 production = StateProductionProfile(
     pd.DataFrame({"g0": [1.0]}, index=["state_0"])
 )
+
 result = simulate_linear(
     grn,
     n_cells=50,
@@ -131,69 +168,58 @@ result = simulate_linear(
     production_state="state_0",
     regulator_activity="spliced",
 )
-
-print(result["layers"]["true_spliced"].shape)
-print(result["var"][["gene_role", "gene_class"]].head())
 ```
 
-### Current Output Modes
+Use `simulate_bifurcation()` for a trunk plus two child branches. The canonical `state_anchor` interface is:
 
-Observed-count generation currently supports:
+- `production_profile`
+- `trunk_state`
+- `branch_child_states`
+- `transition_schedule`
 
-- `poisson_capture`
-- `binomial_capture`
+#### 4. Choose Observed Noise
 
-Legacy aliases are still accepted at the low-level noise helper:
+Observed-count generation supports two canonical capture models:
 
-- `scale_poisson` -> `poisson_capture`
-- `binomial` -> `binomial_capture`
+- `poisson_capture`: scale by `capture_rate`, then optionally sample Poisson counts
+- `binomial_capture`: round latent counts, then apply molecule-level binomial capture
 
-Metadata such as `grn_calibration` and `noise_config` is stored in the plain result dict and carried into AnnData output.
+Recommended interpretation:
 
-### Master-Regulator Alpha Source Modes
+- `poisson_capture`: simple default for lightweight observation noise
+- `binomial_capture`: closest observed-noise analogue to VeloSim technical noise
 
-NVSim supports two master-regulator alpha source modes:
+Main noise parameters:
 
-- `continuous_program`: the original NVSim mode. Master regulator alpha is a
-  time function, `alpha_m(t) = f_m(t)`. This is useful for clean, controlled
-  pseudotime velocity benchmarks.
-- `state_anchor`: a SERGIO-inspired mode. Each state/bin/cell type has a
-  master-regulator production vector, and transitions can interpolate from a
-  parent state to a child state with `step`, `linear`, or `sigmoid` schedules.
-  `sigmoid` is recommended for differentiation-like trajectories because it
-  avoids hard production-rate jumps.
+- `capture_model`
+- `capture_rate`
+- `dropout_rate`
+- `noise_seed`
 
-`StateProductionProfile` values are user-supplied simulation design inputs.
-They can be manually specified, sampled, copied from SERGIO-style bin/cell-type
-production tables, or estimated from external cluster-level TF activity. NVSim
-does not infer them from scRNA-seq by default.
+Legacy aliases such as `scale_poisson` and `binomial` are compatibility-only names and should not be used in new code.
 
-For bifurcation, use the state-anchor interface
-(`trunk_state` + `branch_child_states` + `transition_schedule`) to make smooth
-parent-to-child transitions explicit. `profile_gene_policy="exact"` is the
-default; `profile_gene_policy="subset_fill"` lets missing master regulators use
-`default_master_alpha`.
+#### 5. Inspect Result
+
+Simulation returns a plain dict with these main sections:
+
+- `layers`: `true_unspliced`, `true_spliced`, `true_velocity`, `true_alpha`, plus observed `unspliced` / `spliced`
+- `obs`: cell-level metadata such as pseudotime, branch labels, and sampling indices
+- `var`: gene-level metadata such as `gene_role`, `gene_class`, `true_beta`, and `true_gamma`
+- `uns`: configs and auxiliary metadata such as `true_grn`, `kinetic_params`, `simulation_config`, and `grn_calibration`
+
+Use `to_anndata()` if you want an AnnData object for downstream analysis.
+
+Recommended entry points:
+
+```bash
+python examples/tutorial.py
+python examples/run_mvp_linear.py
+python examples/plot_linear.py
+python examples/run_mvp_bifurcation.py
+python examples/plot_bifurcation.py
+```
 
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
-
-NVSim uses SERGIO-style additive Hill regulation, but the default
-`regulator_activity="spliced"` is not the strict SERGIO-compatible dynamic
-regulator proxy.
-
-Regulatory contributions can choose which RNA state is treated as regulator activity:
-
-- Recommended default: `regulator_activity="spliced"`; uses current `s(t)` as a mature-mRNA / downstream biological proxy.
-- For SERGIO-compatible dynamic comparison runs: `regulator_activity="unspliced"`; uses current `u(t)` as a closer expression-concentration proxy.
-- For sensitivity analysis: compare `regulator_activity="spliced"`, `"unspliced"`, and `"total"`; `total` uses `u(t) + s(t)` as a total-RNA proxy.
-
-Half-response calibration is no longer limited to a separate preprocessing step.
-If a `StateProductionProfile` is available, `simulate_linear()` and
-`simulate_bifurcation()` can now run:
-
-- `auto_calibrate_half_response=False` (default): keep the old explicit behavior;
-- `auto_calibrate_half_response="if_missing"`: fill missing `half_response` only;
-- `auto_calibrate_half_response=True`: always recalibrate from the state/bin
-  production matrix before simulation.
 
 ### Migration Notes
 
@@ -298,68 +324,108 @@ pip install -e .
 pip install -e .[dev]
 ```
 
-### 快速开始
+### Public API Walkthrough
 
-运行小型 linear example：
+#### 1. Define GRN
+
+先用 canonical 列定义 GRN：
+
+- `regulator`
+- `target`
+- `sign`
+- `K`
+- `half_response`
+- `hill_coefficient`
+
+最小示例见上面的英文代码块，接口完全一致。
+
+可读性上建议优先写 `sign="activation"` / `"repression"`；输入阶段也接受 `+` / `-`。
+
+#### 2. Choose Alpha Source
+
+当前 master regulator alpha 来源有两类：
+
+- `continuous_program`：原始 NVSim 模式。master alpha 是连续时间函数，适合做干净、可控的 pseudotime benchmark。
+- `state_anchor`：SERGIO 风格的 state/bin production anchor。每个 state/bin/cell type 有一套 master-regulator production vector，transition 可以用 `step`、`linear` 或 `sigmoid`。
+
+`StateProductionProfile` 是用户提供的 simulation design input，可以手写、采样、复制自 SERGIO 风格 production table，或者由外部 cluster-level TF activity 粗略估计。
+
+如果你在 bifurcation 中使用 `state_anchor`，推荐直接围绕这组 canonical 参数思考：
+
+- `trunk_state`
+- `branch_child_states`
+- `transition_schedule`
+
+分化轨迹默认更推荐 `transition_schedule="sigmoid"`，因为它比 hard step 更平滑。
+
+Hill 调控中把哪一种 RNA 状态当作 regulator activity 也是显式可配的：
+
+- 推荐默认：`regulator_activity="spliced"`
+- 做 SERGIO 风格动态对照：`regulator_activity="unspliced"`
+- 做敏感性分析：比较 `"spliced"`、`"unspliced"` 和 `"total"`
+
+如果提供了 `StateProductionProfile`，还可以直接在模拟前自动补齐或重校准 `half_response`：
+
+- `auto_calibrate_half_response=False`：保持显式输入
+- `auto_calibrate_half_response="if_missing"`：只补缺失项
+- `auto_calibrate_half_response=True`：总是在模拟前重校准
+
+#### 3. Choose Trajectory
+
+单一连续轨迹用 `simulate_linear()`。
+
+trunk 加两条子分支用 `simulate_bifurcation()`。
+
+对于 canonical 的 bifurcation `state_anchor` 用法，主要入口就是：
+
+- `production_profile`
+- `trunk_state`
+- `branch_child_states`
+- `transition_schedule`
+
+#### 4. Choose Observed Noise
+
+当前 observed noise 只有两种 canonical capture model：
+
+- `poisson_capture`：先按 `capture_rate` 缩放，再可选做 Poisson 采样
+- `binomial_capture`：先把 latent count 四舍五入，再做逐分子的 binomial capture
+
+可以这样理解：
+
+- `poisson_capture`：轻量默认噪声
+- `binomial_capture`：在 observed noise 语义上最接近 VeloSim technical noise
+
+最常调的噪声参数是：
+
+- `capture_model`
+- `capture_rate`
+- `dropout_rate`
+- `noise_seed`
+
+`scale_poisson` 和 `binomial` 这些旧名字只保留兼容意义，新代码不建议再使用。
+
+#### 5. Inspect Result
+
+模拟结果是一个 plain dict，重点看四块：
+
+- `layers`：`true_unspliced`、`true_spliced`、`true_velocity`、`true_alpha`，以及 observed `unspliced` / `spliced`
+- `obs`：细胞级元数据，例如 pseudotime、branch、sampling index
+- `var`：基因级元数据，例如 `gene_role`、`gene_class`、`true_beta`、`true_gamma`
+- `uns`：配置和辅助元数据，例如 `true_grn`、`kinetic_params`、`simulation_config`、`grn_calibration`
+
+如果你要接下游分析，可以用 `to_anndata()` 转成 AnnData。
+
+建议从这些入口开始：
 
 ```bash
+python examples/tutorial.py
 python examples/run_mvp_linear.py
 python examples/plot_linear.py
-```
-
-运行 bifurcation example：
-
-```bash
 python examples/run_mvp_bifurcation.py
 python examples/plot_bifurcation.py
 ```
 
-最小 Python 调用示例见上面的英文部分，接口相同。
-
-### 当前支持的 observed-count 模式
-
-目前支持两种 observed count generation：
-
-- `poisson_capture`
-- `binomial_capture`
-
-为了兼容旧脚本，底层 noise helper 仍接受 legacy alias：
-
-- `scale_poisson` -> `poisson_capture`
-- `binomial` -> `binomial_capture`
-
-同时，`grn_calibration` 和 `noise_config` 会保存在 result dict 中，并在导出 AnnData 时保留下来。
-
-### Master-Regulator Alpha Source Modes
-
-NVSim 现在支持两种 master regulator alpha 来源：
-
-- `continuous_program`：原有 NVSim 模式。master regulator alpha 是连续时间函数，即 `alpha_m(t) = f_m(t)`，适合干净、机制可控的 pseudotime velocity benchmark。
-- `state_anchor`：借鉴 SERGIO 的 state/bin production 设计。每个 state/bin/cell type 有一套 master-regulator production vector；transition 时可以用 `step`、`linear` 或 `sigmoid` 从 parent state 平滑过渡到 child state。分化轨迹默认推荐 `sigmoid`，避免 hard switching 造成表达或 embedding 断裂。
-
-`StateProductionProfile` 是用户提供的 simulation design input。数值可以手写、从 low/high range 采样、来自 SERGIO 风格 bin/cell-type production table，或者从外部 cluster-level TF activity 粗略估计；NVSim 默认不会从 scRNA-seq 自动反推这些 production values。
-
-bifurcation 使用 `trunk_state` + `branch_child_states` + `transition_schedule`，用于显式描述 parent-to-child regulatory-anchor transition。默认 `profile_gene_policy="exact"`，真实大网络里可用 `profile_gene_policy="subset_fill"` 让缺失 master regulator 使用 `default_master_alpha`。
-
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。
-
-当前仍然是 SERGIO 风格的加性 Hill regulation，但默认的
-`regulator_activity="spliced"` 并不是严格的 SERGIO-compatible dynamic
-regulator proxy。
-
-Hill 调控里使用哪一种 RNA 状态作为 regulator activity 现在也是显式可配的：
-
-- 推荐默认：`regulator_activity="spliced"`，用当前 `s(t)` 作为 mature mRNA / downstream proxy；
-- 做 SERGIO-compatible dynamic 对照时：`regulator_activity="unspliced"`，用当前 `u(t)`，更接近 SERGIO 风格的表达浓度代理；
-- 做 sensitivity analysis 时：比较 `regulator_activity="spliced"`、`"unspliced"` 和 `"total"`；其中 `total` 用 `u(t) + s(t)` 作为 total RNA proxy。
-
-half-response calibration 也不再只能作为单独预处理步骤使用。
-如果提供了 `StateProductionProfile`，现在可以在
-`simulate_linear()` / `simulate_bifurcation()` 中直接使用：
-
-- `auto_calibrate_half_response=False`：保持原来的显式预处理行为；
-- `auto_calibrate_half_response="if_missing"`：只在缺失 `half_response` 时自动补齐；
-- `auto_calibrate_half_response=True`：在模拟前根据 state/bin production matrix 主动重校准。
 
 ### 迁移说明
 

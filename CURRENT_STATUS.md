@@ -126,23 +126,20 @@ Observed count generation currently supports both `scale_poisson` and VeloSim-st
 
 `nvsim/plotting.py` supports:
 
-- PCA embedding from true or observed spliced layers.
-- UMAP from PCA coordinates when `umap-learn` is installed; otherwise PCA fallback.
-- Embedding colored by pseudotime.
-- Embedding colored by branch.
-- PCA velocity quick-look arrows using projected true velocity.
-- Phase portraits for true or observed layers.
-- Gene dynamics over pseudotime for `true_alpha`, `true_unspliced`, `true_spliced`, and `true_velocity`.
-- Representative bifurcation gene selection by post-branch `true_alpha` divergence.
+- scanpy PCA/neighbors/UMAP on true or observed expression layers.
+- scVelo stream plots using NVSim ground-truth `true_velocity`.
+- Embeddings colored by pseudotime or branch.
+- Phase portraits for true or observed layers, with gene-level 2D velocity arrows using `ds/dt` and `du/dt`.
+- Gene dynamics over pseudotime for `true_alpha`, `true_unspliced`, `true_spliced`, `true_velocity`, and `true_velocity_u`.
+- Representative gene selection for showcase panels.
 
 True-layer plots are the primary scientific validation views. Observed plots are technical-noise diagnostics. `observed_lownoise` plots use `poisson_observed=False` for visualization/debugging.
 
 ## Current Examples
 
 - `examples/run_mvp_linear.py`: generate a 20-gene linear dataset and save `mvp_linear.h5ad` if AnnData is available.
-- `examples/plot_linear.py`: generate organized quick-look plots under `examples/plots_linear/`.
 - `examples/run_mvp_bifurcation.py`: generate a trunk/two-branch dataset and save `mvp_bifurcation.h5ad` if AnnData is available.
-- `examples/plot_bifurcation.py`: generate organized quick-look plots under `examples/plots_bifurcation/` and save selected-gene diagnostics.
+- `examples/plot_velocity_showcase.py`: generate scanpy/scVelo velocity showcase plots under `examples/outputs/velocity_showcase/`.
 
 ## Current Tests
 

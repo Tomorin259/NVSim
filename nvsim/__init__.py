@@ -31,25 +31,24 @@ from .simulate import create_kinetic_vectors, initialize_state, simulate_bifurca
 from .noise import generate_observed_counts
 from .output import make_result_dict, to_anndata
 
-# SERGIO-compatible inputs and quick-look plotting.
+# SERGIO-compatible inputs and plotting.
 from .sergio_io import SergioInputs, load_sergio_targets_regs
 from .plotting import (
-    compute_pca_embedding,
-    compute_umap_embedding,
-    plot_embedding_by_branch,
-    plot_embedding_by_pseudotime,
-    plot_embedding_with_velocity,
+    embed,
+    plot_gene_dynamics,
     plot_gene_dynamics_over_pseudotime,
     plot_phase_portrait,
+    plot_phase_gallery,
     plot_phase_portrait_gallery,
-    select_representative_genes_by_dynamics,
-)
-from .velocity_plotting import (
+    plot_showcase,
     plot_velocity_showcase,
+    prepare_adata,
     prepare_velocity_adata,
+    select_genes,
+    select_velocity_showcase_genes,
     run_scanpy_embedding,
     run_scvelo_velocity_stream,
-    select_velocity_showcase_genes,
+    velocity_stream,
 )
 
 __all__ = [
@@ -82,15 +81,16 @@ __all__ = [
     "to_anndata",
     "SergioInputs",
     "load_sergio_targets_regs",
-    "compute_pca_embedding",
-    "compute_umap_embedding",
-    "plot_embedding_by_pseudotime",
-    "plot_embedding_by_branch",
-    "plot_embedding_with_velocity",
+    "prepare_adata",
+    "embed",
+    "velocity_stream",
+    "select_genes",
+    "plot_showcase",
     "plot_phase_portrait",
+    "plot_phase_gallery",
     "plot_phase_portrait_gallery",
+    "plot_gene_dynamics",
     "plot_gene_dynamics_over_pseudotime",
-    "select_representative_genes_by_dynamics",
     "prepare_velocity_adata",
     "run_scanpy_embedding",
     "run_scvelo_velocity_stream",

@@ -1,25 +1,25 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pytest
 
 from nvsim.grn import GRN
 from nvsim.output import to_anndata
 from nvsim.plotting import (
-    compute_pca_embedding,
-    plot_embedding_by_pseudotime,
-    plot_embedding_with_velocity,
-    plot_gene_dynamics_over_pseudotime,
-    plot_phase_portrait_gallery,
+    embed,
+    plot_gene_dynamics,
+    plot_phase_gallery,
     plot_phase_portrait,
-    select_representative_genes_by_dynamics,
+    prepare_adata,
+    select_genes,
 )
 from nvsim.production import linear_decrease, linear_increase
 from nvsim.simulate import simulate_bifurcation, simulate_linear
 
 
-def _result():
+def _linear_result():
     grn = GRN.from_dataframe(
         pd.DataFrame(
             {
@@ -32,74 +32,10 @@ def _result():
         ),
         genes=["g0", "g1", "g2"],
     )
-    return simulate_linear(grn, n_cells=12, time_end=1.0, dt=0.05, seed=21)
+    return simulate_linear(grn, n_cells=12, time_end=1.0, dt=0.05, seed=21, poisson_observed=False)
 
 
-def test_plotting_functions_save_files(tmp_path: Path):
-    result = _result()
-    embedding, components = compute_pca_embedding(result, layer_preference="observed")
-    assert embedding.shape == (12, 2)
-    assert components.shape == (2, 3)
-
-    paths = [
-        tmp_path / "embedding_by_pseudotime.png",
-        tmp_path / "phase_portrait_gene0_true.png",
-        tmp_path / "phase_portrait_gene0_observed.png",
-        tmp_path / "gene_dynamics_gene0.png",
-    ]
-    plot_embedding_by_pseudotime(result, embedding=embedding, output_path=paths[0])
-    plot_phase_portrait(result, "g0", mode="true", output_path=paths[1])
-    plot_phase_portrait(result, "g0", mode="observed", output_path=paths[2])
-    plot_gene_dynamics_over_pseudotime(result, "g0", output_path=paths[3])
-    plt.close("all")
-
-    for path in paths:
-        assert path.exists()
-        assert path.stat().st_size > 0
-
-
-def test_true_and_observed_pca_layer_preferences_run():
-    result = _result()
-    true_embedding, true_components = compute_pca_embedding(result, layer_preference="true")
-    observed_embedding, observed_components = compute_pca_embedding(result, layer_preference="observed")
-
-    assert true_embedding.shape == observed_embedding.shape == (12, 2)
-    assert true_components.shape == observed_components.shape == (2, 3)
-
-
-def test_velocity_plot_defaults_to_pca(tmp_path: Path):
-    result = _result()
-    path = tmp_path / "velocity.png"
-    fig = plot_embedding_with_velocity(result, output_path=path)
-    title = fig.axes[0].get_title()
-    plt.close("all")
-
-    assert title.startswith("PCA true spliced")
-    assert path.exists()
-    assert path.stat().st_size > 0
-
-
-def test_plotting_handles_anndata_when_available(tmp_path: Path):
-    pytest.importorskip("anndata")
-    adata = to_anndata(_result())
-    path = tmp_path / "adata_phase.png"
-    plot_phase_portrait(adata, "g0", mode="true", output_path=path)
-    plt.close("all")
-    assert path.exists()
-    assert path.stat().st_size > 0
-
-
-def test_phase_portrait_gallery_saves_thumbnail_grid(tmp_path: Path):
-    result = _result()
-    path = tmp_path / "gallery.png"
-    fig = plot_phase_portrait_gallery(result, mode="true", max_cols=2, output_path=path)
-    plt.close(fig)
-
-    assert path.exists()
-    assert path.stat().st_size > 0
-
-
-def test_dynamic_representative_selection_prefers_valid_edge_types():
+def _bifurcation_result():
     grn = GRN.from_dataframe(
         pd.DataFrame(
             {
@@ -112,7 +48,7 @@ def test_dynamic_representative_selection_prefers_valid_edge_types():
         ),
         genes=["g0", "g1", "g2", "g3"],
     )
-    result = simulate_bifurcation(
+    return simulate_bifurcation(
         grn,
         n_trunk_cells=8,
         n_branch_cells={"branch_0": 8, "branch_1": 8},
@@ -128,13 +64,78 @@ def test_dynamic_representative_selection_prefers_valid_edge_types():
         poisson_observed=False,
     )
 
-    selection = select_representative_genes_by_dynamics(result, grn)
-    selected = selection["genes"]
 
-    assert set(selected).issuperset({"master", "activation_target", "repression_target"})
-    assert selected["master"] in grn.genes
-    assert selected["activation_target"] == "g2"
-    assert selected["repression_target"] == "g3"
-    assert selection["alpha_differences"]["master"] >= 0.0
-    assert set(selection["edges"]["activation_target"]["sign"]) == {"activation"}
-    assert set(selection["edges"]["repression_target"]["sign"]) == {"repression"}
+def test_prepare_adata_true_layers_from_result_dict():
+    result = _linear_result()
+    adata = prepare_adata(result, expression_layer="true")
+
+    assert np.allclose(adata.X, result["layers"]["true_spliced"])
+    assert np.allclose(adata.layers["spliced"], result["layers"]["true_spliced"])
+    assert np.allclose(adata.layers["unspliced"], result["layers"]["true_unspliced"])
+    assert np.allclose(adata.layers["velocity"], result["layers"]["true_velocity"])
+    assert adata.uns["nvsim_velocity_showcase"]["expression_layer"] == "true"
+
+
+def test_prepare_adata_observed_layers_from_result_dict():
+    result = _linear_result()
+    adata = prepare_adata(result, expression_layer="observed")
+
+    assert np.allclose(adata.X, result["layers"]["spliced"])
+    assert np.allclose(adata.layers["spliced"], result["layers"]["spliced"])
+    assert np.allclose(adata.layers["unspliced"], result["layers"]["unspliced"])
+    assert np.allclose(adata.layers["velocity"], result["layers"]["true_velocity"])
+
+
+def test_prepare_adata_missing_layer_raises_clear_error():
+    result = _linear_result()
+    del result["layers"]["true_velocity"]
+
+    with pytest.raises(KeyError, match="true_velocity"):
+        prepare_adata(result, expression_layer="true")
+
+
+def test_embed_smoke_when_scanpy_available():
+    pytest.importorskip("scanpy")
+    adata = prepare_adata(_linear_result(), expression_layer="true")
+    embed(adata, n_pcs=20, n_neighbors=5, random_state=0)
+
+    assert "X_pca" in adata.obsm
+    assert "X_umap" in adata.obsm
+    assert adata.obsm["X_umap"].shape == (adata.n_obs, 2)
+
+
+def test_phase_portrait_uses_two_dimensional_gene_velocity(tmp_path: Path):
+    result = _linear_result()
+    adata = to_anndata(result)
+    path = tmp_path / "phase.png"
+    fig = plot_phase_portrait(adata, "g0", mode="true", output_path=path, show_velocity=True)
+    plt.close(fig)
+
+    assert path.exists()
+    assert path.stat().st_size > 0
+    assert "true_velocity" in adata.layers
+    assert "true_velocity_u" in adata.layers
+
+
+def test_phase_gallery_and_gene_dynamics_save_files(tmp_path: Path):
+    result = _linear_result()
+    paths = [
+        tmp_path / "gallery.png",
+        tmp_path / "gene_dynamics.png",
+    ]
+    fig = plot_phase_gallery(result, genes=["g0", "g1"], mode="true", max_cols=2, output_path=paths[0])
+    plt.close(fig)
+    fig = plot_gene_dynamics(result, genes=["g0", "g1"], output_path=paths[1])
+    plt.close(fig)
+
+    for path in paths:
+        assert path.exists()
+        assert path.stat().st_size > 0
+
+
+def test_select_genes_returns_valid_representatives():
+    adata = prepare_adata(_bifurcation_result(), expression_layer="true")
+    selected = select_genes(adata, representative_genes="auto")
+
+    assert 3 <= len(selected) <= 4
+    assert set(selected).issubset(set(map(str, adata.var_names)))

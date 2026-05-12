@@ -63,8 +63,7 @@ The public API follows a flat `nvsim/*.py` layout so the core model is easy to i
 - `nvsim/simulate.py`: beta/gamma setup, initial `u0/s0` validation, deterministic ODE integration, snapshot sampling, and result assembly.
 - `nvsim/noise.py`: observed-count generation for canonical `poisson_capture` and `binomial_capture` models.
 - `nvsim/output.py`: plain dict output and optional AnnData export.
-- `nvsim/plotting.py`: lightweight quick-look diagnostics with minimal dependencies.
-- `nvsim/velocity_plotting.py`: scanpy/scVelo RNA velocity-style showcase workflow.
+- `nvsim/plotting.py`: scanpy/scVelo-based velocity showcase workflow plus mechanistic diagnostics such as gene dynamics and phase portraits.
 - `nvsim/sergio_io.py`: SERGIO `targets/regs` parser.
 
 ### Install
@@ -81,11 +80,7 @@ Development install:
 pip install -e .[dev]
 ```
 
-Velocity showcase plotting additionally uses scanpy and scVelo:
-
-```bash
-pip install -e .[velocity]
-```
+scanpy and scVelo are installed as core dependencies because the public plotting workflow delegates PCA/neighbors/UMAP to scanpy and velocity stream visualization to scVelo.
 
 ### Public API Walkthrough
 
@@ -221,14 +216,7 @@ Recommended entry points:
 ```bash
 python examples/tutorial.py
 python examples/run_mvp_linear.py
-python examples/plot_linear.py
 python examples/run_mvp_bifurcation.py
-python examples/plot_bifurcation.py
-```
-
-For scanpy/scVelo RNA velocity-style visualization:
-
-```bash
 python examples/plot_velocity_showcase.py
 ```
 
@@ -320,8 +308,7 @@ v_i(t) = beta_i * u_i(t) - gamma_i * s_i(t)
 - `nvsim/simulate.py`：`beta/gamma` 构造、`u0/s0` 初始状态校验、确定性 ODE 积分、snapshot sampling 和结果装配。
 - `nvsim/noise.py`：canonical `poisson_capture` 与 `binomial_capture` 两类 observed-count 生成。
 - `nvsim/output.py`：plain dict 输出和可选 AnnData 导出。
-- `nvsim/plotting.py`：PCA/UMAP、phase portrait、dynamics 和缩略图库绘图。
-- `nvsim/velocity_plotting.py`：基于 scanpy/scVelo 的 velocity showcase workflow。
+- `nvsim/plotting.py`：基于 scanpy/scVelo 的 velocity showcase workflow，以及 gene dynamics、phase portrait 等机制诊断图。
 - `nvsim/sergio_io.py`：SERGIO `targets/regs` 输入解析。
 
 ### 安装
@@ -434,9 +421,8 @@ trunk 加两条子分支用 `simulate_bifurcation()`。
 ```bash
 python examples/tutorial.py
 python examples/run_mvp_linear.py
-python examples/plot_linear.py
 python examples/run_mvp_bifurcation.py
-python examples/plot_bifurcation.py
+python examples/plot_velocity_showcase.py
 ```
 
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。

@@ -1,412 +1,430 @@
-"""NVSim 结果快速检查用的轻量 matplotlib 绘图工具。
+"""scanpy/scVelo-based plotting and mechanistic diagnostics for NVSim.
 
-约定：
-- 所有 layer 矩阵都是 cells x genes。
-- phase portrait 默认使用 true layers，因为 observed UMI 在 capture/Poisson
-  后可能非常离散，不适合检查真实动力学。
-- observed UMAP 在稀疏/噪声条件下可能把连续轨迹切碎；科学检查应优先看
-  true PCA、true velocity arrows 和 gene dynamics。
-- velocity arrows 是 PCA 投影的 quick-look 诊断，不是完整 scVelo-style
-  velocity embedding。
+This is the single public plotting module. scanpy handles PCA/neighbors/UMAP,
+scVelo handles velocity graph and velocity stream visualization, and NVSim keeps
+small mechanistic diagnostics such as phase portraits and gene dynamics.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+import json
+import warnings
+from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
 
 import matplotlib
+
 matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 
-
-VALID_LAYER_PREFERENCES = {"observed", "true", "auto"}
-DEFAULT_BRANCH_COLORS = {
-    "trunk": "tab:blue",
-    "branch_0": "tab:orange",
-    "branch_1": "tab:green",
-    "root": "tab:blue",
-    "all": "tab:blue",
-}
+from .output import to_anndata
 
 
 def _is_anndata(obj: Any) -> bool:
     return hasattr(obj, "layers") and hasattr(obj, "obs") and hasattr(obj, "var")
 
 
-def _layers(data: Any) -> dict[str, np.ndarray]:
-    """统一读取 dict 或 AnnData 中的 layers。"""
-
-    if _is_anndata(data):
-        return {key: np.asarray(value) for key, value in data.layers.items()}
-    return data["layers"]
-
-
-def _obs(data: Any) -> pd.DataFrame:
-    return data.obs.copy() if _is_anndata(data) else data["obs"].copy()
+def _dense_array(value: Any, *, name: str) -> np.ndarray:
+    if hasattr(value, "toarray"):
+        value = value.toarray()
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim != 2:
+        raise ValueError(f"{name} must be a 2D cells x genes matrix")
+    return arr.copy()
 
 
-def _var_names(data: Any) -> list[str]:
-    if _is_anndata(data):
-        return [str(name) for name in data.var_names]
-    var = data["var"]
-    return [str(name) for name in var.index]
+def _require_layer(adata: Any, layer: str) -> np.ndarray:
+    if layer not in adata.layers:
+        raise KeyError(f"missing required AnnData layer {layer!r}")
+    return _dense_array(adata.layers[layer], name=f"adata.layers[{layer!r}]")
 
 
-def _matrix(data: Any, layer: str) -> np.ndarray:
-    layers = _layers(data)
-    if layer not in layers:
-        raise KeyError(f"missing layer {layer!r}")
-    return np.asarray(layers[layer], dtype=float)
-
-
-def _spliced_layer_name(data: Any, layer_preference: str) -> str:
-    """根据 layer_preference 明确选择 true 或 observed spliced layer。"""
-
-    if layer_preference not in VALID_LAYER_PREFERENCES:
-        raise ValueError(f"layer_preference must be one of {sorted(VALID_LAYER_PREFERENCES)}")
-    layers = _layers(data)
-    if layer_preference == "true":
-        if "true_spliced" not in layers:
-            raise KeyError("missing layer 'true_spliced' for true inspection")
-        return "true_spliced"
-    if layer_preference == "observed":
-        if "spliced" not in layers:
-            raise KeyError("missing observed layer 'spliced'; use layer_preference='true' instead")
-        return "spliced"
-    if "spliced" in layers:
-        return "spliced"
-    if "true_spliced" in layers:
-        return "true_spliced"
-    raise KeyError("missing both 'spliced' and 'true_spliced' layers")
-
-
-def _gene_index(data: Any, gene: str | int) -> int:
-    names = _var_names(data)
-    if isinstance(gene, int):
-        if gene < 0 or gene >= len(names):
-            raise IndexError(f"gene index {gene} out of range")
-        return gene
-    gene = str(gene)
-    if gene not in names:
-        raise KeyError(f"gene {gene!r} not found")
-    return names.index(gene)
-
-
-def _pseudotime(data: Any) -> np.ndarray:
-    obs = _obs(data)
-    if "pseudotime" not in obs.columns:
-        raise KeyError("obs must contain pseudotime")
-    return obs["pseudotime"].to_numpy(dtype=float)
-
-
-def _branch(data: Any) -> np.ndarray:
-    obs = _obs(data)
-    if "branch" not in obs.columns:
-        return np.array(["all"] * obs.shape[0], dtype=object)
-    return obs["branch"].astype(str).to_numpy()
-
-
-def _gene_edges(grn: Any, gene: str) -> pd.DataFrame:
-    if grn is None or not hasattr(grn, "edges"):
-        return pd.DataFrame()
-    return grn.edges.loc[grn.edges["target"].astype(str) == str(gene)].copy()
-
-
-def _incoming_targets(grn: Any, sign: str) -> set[str]:
-    if grn is None or not hasattr(grn, "edges"):
-        return set()
-    edges = grn.edges
-    return set(edges.loc[edges["sign"] == sign, "target"].astype(str))
-
-
-def select_representative_genes_by_dynamics(data: Any, grn: Any | None = None) -> dict[str, Any]:
-    """按 branch 后 alpha 差异自动选择代表基因。
-
-    对 bifurcation 数据，分别在 master、activation target、repression target
-    候选集合中，选择 branch_0 与 branch_1 平均 ``true_alpha`` 差异最大的
-    基因。这样绘图优先展示真正有分支动态差异的基因。
-    """
-
-    genes = _var_names(data)
-    incoming = set(grn.edges["target"].astype(str)) if grn is not None and hasattr(grn, "edges") else set()
-    master_candidates = [gene for gene in genes if gene not in incoming] or genes[:1]
-    activation_candidates = [gene for gene in genes if gene in _incoming_targets(grn, "activation")]
-    repression_candidates = [gene for gene in genes if gene in _incoming_targets(grn, "repression")]
-
-    diffs = {gene: 0.0 for gene in genes}
-    try:
-        alpha = _matrix(data, "true_alpha")
-        branches = _branch(data)
-        branch0 = branches == "branch_0"
-        branch1 = branches == "branch_1"
-        if branch0.any() and branch1.any():
-            for idx, gene in enumerate(genes):
-                diffs[gene] = float(abs(alpha[branch0, idx].mean() - alpha[branch1, idx].mean()))
-    except (KeyError, ValueError):
-        pass
-
-    used: set[str] = set()
-
-    def choose(candidates: list[str], fallback: list[str], allow_used: bool = False) -> str:
-        pool = candidates or fallback or genes[:1]
-        available = pool if allow_used else [gene for gene in pool if gene not in used]
-        if not available:
-            available = pool
-        gene = max(available, key=lambda item: (diffs.get(item, 0.0), -genes.index(item)))
-        used.add(gene)
-        return gene
-
-    selected = {
-        "master": choose(master_candidates, genes[:1]),
-        "activation_target": choose(activation_candidates, genes[min(1, len(genes) - 1): min(2, len(genes))] or genes[:1]),
-        "repression_target": choose(repression_candidates, genes[min(2, len(genes) - 1): min(3, len(genes))] or genes[:1]),
-    }
-    return {
-        "genes": selected,
-        "alpha_differences": {label: diffs[gene] for label, gene in selected.items()},
-        "edges": {label: _gene_edges(grn, gene) for label, gene in selected.items()},
-    }
-
-
-def compute_pca_embedding(
+def prepare_adata(
     data: Any,
-    n_components: int = 2,
-    layer_preference: str = "observed",
-) -> tuple[np.ndarray, np.ndarray]:
-    """从指定 spliced layer 计算 PCA embedding。
+    expression_layer: str = "true",
+    velocity_layer: str = "true_velocity",
+    copy: bool = True,
+):
+    """Prepare AnnData for scanpy/scVelo velocity visualization.
 
-    ``layer_preference='observed'`` 使用 ``spliced``；``'true'`` 使用
-    ``true_spliced``；``'auto'`` 优先 observed，缺失时回退到 true。返回
-    ``(coords, components)``，其中 coords 是 cells x components，components
-    是 components x genes，可用于把 true velocity 投影到 PCA 空间。
+    Parameters
+    ----------
+    data:
+        NVSim result dict or AnnData. Result dicts are first converted with
+        ``nvsim.output.to_anndata``.
+    expression_layer:
+        ``"true"`` uses simulator truth layers: ``true_spliced`` for ``X`` and
+        ``spliced``, and ``true_unspliced`` for ``unspliced``.
+        ``"observed"`` uses noisy observed ``spliced``/``unspliced`` layers.
+    velocity_layer:
+        Source layer copied into ``adata.layers["velocity"]``. The default
+        ``"true_velocity"`` is the simulator ground-truth ``ds/dt`` RNA
+        velocity, not an inferred velocity.
+    copy:
+        Copy AnnData inputs before modifying them.
     """
 
-    layer = _spliced_layer_name(data, layer_preference)
-    x = _matrix(data, layer)
-    if x.ndim != 2:
-        raise ValueError(f"{layer} matrix must be 2D cells x genes")
-    if x.shape[0] < 2:
-        raise ValueError("at least two cells are required for PCA")
-    n_components = min(int(n_components), x.shape[0], x.shape[1])
-    if n_components < 1:
-        raise ValueError("n_components must be positive")
-    x_log = np.log1p(np.maximum(x, 0.0))
-    centered = x_log - x_log.mean(axis=0, keepdims=True)
-    _, _, vt = np.linalg.svd(centered, full_matrices=False)
-    coords = centered @ vt[:n_components].T
-    if coords.shape[1] < 2:
-        coords = np.pad(coords, ((0, 0), (0, 2 - coords.shape[1])))
-        vt_use = np.pad(vt[:n_components], ((0, 2 - n_components), (0, 0)))
+    if expression_layer not in {"true", "observed"}:
+        raise ValueError("expression_layer must be 'true' or 'observed'")
+    if _is_anndata(data):
+        adata = data.copy() if copy else data
+    elif isinstance(data, dict):
+        adata = to_anndata(data)
+        if not copy:
+            # Result dict conversion always creates a new AnnData object.
+            pass
     else:
-        vt_use = vt[:n_components]
-    return coords[:, :2], vt_use[:2]
+        raise TypeError("data must be an NVSim result dict or AnnData")
+
+    if expression_layer == "true":
+        spliced_key = "true_spliced"
+        unspliced_key = "true_unspliced"
+    else:
+        spliced_key = "spliced"
+        unspliced_key = "unspliced"
+
+    spliced = _require_layer(adata, spliced_key)
+    unspliced = _require_layer(adata, unspliced_key)
+    velocity = _require_layer(adata, velocity_layer)
+
+    expected = spliced.shape
+    for key, arr in [(unspliced_key, unspliced), (velocity_layer, velocity)]:
+        if arr.shape != expected:
+            raise ValueError(f"layer {key!r} has shape {arr.shape}, expected {expected}")
+
+    adata.X = spliced.copy()
+    adata.layers["spliced"] = spliced.copy()
+    adata.layers["unspliced"] = unspliced.copy()
+    adata.layers["velocity"] = velocity.copy()
+    adata.uns.setdefault("nvsim_velocity_showcase", {})
+    adata.uns["nvsim_velocity_showcase"].update(
+        {
+            "expression_layer": expression_layer,
+            "selected_spliced_layer": spliced_key,
+            "selected_unspliced_layer": unspliced_key,
+            "velocity_layer": velocity_layer,
+            "velocity_kind": "ground_truth" if velocity_layer == "true_velocity" else "custom",
+        }
+    )
+    return adata
 
 
-def compute_umap_embedding(
-    data: Any,
+def embed(
+    adata: Any,
+    n_pcs: int = 20,
+    n_neighbors: int = 15,
+    min_dist: float = 0.3,
+    basis: str = "umap",
+    scale: bool = False,
+    log1p: bool = False,
     random_state: int = 0,
-    layer_preference: str = "observed",
-) -> tuple[np.ndarray, str, np.ndarray]:
-    """如果安装了 umap-learn，则从 PCA 坐标继续计算 UMAP。
+    copy: bool = False,
+):
+    """Run scanpy PCA, neighbors, and UMAP on the selected expression matrix.
 
-    UMAP 主要用于 observed layer 的定性观察。它可能在稀疏/噪声数据上
-    把简单连续轨迹切碎，因此不能把 observed UMAP 当成唯一科学验证图。
-    若未安装 umap-learn，会自动回退到 PCA。
+    NVSim true layers are already simulator states rather than ordinary count
+    matrices, so this function does not normalize total counts by default.
     """
 
-    pca_coords, pca_components = compute_pca_embedding(data, n_components=2, layer_preference=layer_preference)
     try:
-        import umap
-    except ImportError:
-        return pca_coords, "pca", pca_components
-    reducer = umap.UMAP(n_components=2, random_state=random_state)
-    return reducer.fit_transform(pca_coords), "umap", pca_components
+        import scanpy as sc
+    except ImportError as exc:
+        raise ImportError("scanpy is required for embed") from exc
+
+    if basis != "umap":
+        raise ValueError("currently only basis='umap' is supported for scanpy embedding")
+    out = adata.copy() if copy else adata
+    if out.n_obs < 3:
+        raise ValueError("at least three cells are required for scanpy neighbors/UMAP")
+    if out.n_vars < 2:
+        raise ValueError("at least two genes are required for scanpy PCA")
+
+    n_pcs_use = min(int(n_pcs), out.n_obs - 1, out.n_vars - 1)
+    if n_pcs_use < 1:
+        raise ValueError("n_pcs is too small after shape adjustment")
+
+    if log1p:
+        sc.pp.log1p(out)
+    if scale:
+        sc.pp.scale(out)
+    sc.pp.pca(out, n_comps=n_pcs_use, random_state=random_state, svd_solver="arpack")
+    neighbors_use = min(int(n_neighbors), out.n_obs - 1)
+    if neighbors_use < 2:
+        raise ValueError("n_neighbors is too small after shape adjustment")
+    sc.pp.neighbors(out, n_neighbors=neighbors_use, n_pcs=n_pcs_use, random_state=random_state)
+    sc.tl.umap(out, min_dist=min_dist, random_state=random_state)
+    return out
 
 
-def _new_ax(ax=None, figsize=(6, 5)):
-    if ax is not None:
-        return ax.figure, ax
-    fig, ax = plt.subplots(figsize=figsize)
-    return fig, ax
+def velocity_stream(
+    adata: Any,
+    basis: str = "umap",
+    velocity_layer: str = "velocity",
+    recompute_graph: bool = True,
+):
+    """Build scVelo velocity graph/embedding from an existing velocity layer.
+
+    ``adata.layers[velocity_layer]`` is assumed to already contain NVSim
+    ground-truth velocity, usually ``true_velocity`` copied to ``velocity`` by
+    ``prepare_adata``. This function does not estimate velocity with
+    scVelo stochastic or dynamical models.
+    """
+
+    try:
+        import scvelo as scv
+    except ImportError as exc:
+        raise ImportError("scvelo is required for velocity_stream") from exc
+
+    if velocity_layer not in adata.layers:
+        raise KeyError(f"missing velocity layer {velocity_layer!r}")
+    if f"X_{basis}" not in adata.obsm:
+        raise KeyError(f"missing embedding adata.obsm['X_{basis}']; run embed first")
+    if velocity_layer != "velocity":
+        adata.layers["velocity"] = _dense_array(adata.layers[velocity_layer], name=velocity_layer)
+        vkey = "velocity"
+    else:
+        adata.layers["velocity"] = _dense_array(adata.layers["velocity"], name="velocity")
+        vkey = "velocity"
+
+    try:
+        if recompute_graph or f"{vkey}_graph" not in adata.uns:
+            scv.tl.velocity_graph(adata, vkey=vkey)
+        scv.tl.velocity_embedding(adata, basis=basis, vkey=vkey)
+    except Exception as exc:  # scVelo raises several implementation-specific errors.
+        raise RuntimeError(
+            "scVelo failed to build a velocity graph/embedding from the supplied "
+            f"ground-truth velocity layer {velocity_layer!r}: {exc}"
+        ) from exc
+    return adata
 
 
-def _point_size(n_cells: int, emphasis: str = "default") -> float:
-    if emphasis == "dense":
-        return 10.0 if n_cells > 1200 else 14.0 if n_cells > 500 else 18.0
-    return 14.0 if n_cells > 1200 else 18.0 if n_cells > 500 else 24.0
+def _grn_dataframe(adata: Any) -> pd.DataFrame:
+    raw = adata.uns.get("true_grn")
+    if raw is None:
+        return pd.DataFrame()
+    if isinstance(raw, pd.DataFrame):
+        return raw.copy()
+    if isinstance(raw, dict) and {"columns", "data"}.issubset(raw):
+        index = raw.get("index")
+        return pd.DataFrame(raw["data"], columns=raw["columns"], index=index)
+    try:
+        return pd.DataFrame(raw)
+    except Exception:
+        return pd.DataFrame()
 
 
-def _branch_color(branch: str, idx: int) -> str:
-    branch = str(branch)
-    if branch in DEFAULT_BRANCH_COLORS:
-        return DEFAULT_BRANCH_COLORS[branch]
-    cmap = plt.get_cmap("tab10")
-    return cmap(idx % 10)
+def select_genes(adata: Any, representative_genes: Any = "auto") -> list[str]:
+    """Select stable representative genes for velocity showcase panels."""
+
+    genes = [str(gene) for gene in adata.var_names]
+    if representative_genes != "auto":
+        selected = [str(gene) for gene in representative_genes]
+        missing = [gene for gene in selected if gene not in genes]
+        if missing:
+            raise KeyError(f"representative genes not found: {missing}")
+        return selected
+
+    selected: list[str] = []
+
+    def add(gene: str | None) -> None:
+        if gene is not None and gene in genes and gene not in selected:
+            selected.append(gene)
+
+    alpha = np.asarray(adata.layers.get("true_alpha", adata.layers["velocity"]), dtype=float)
+    spliced = np.asarray(adata.layers.get("true_spliced", adata.layers["spliced"]), dtype=float)
+    velocity = np.asarray(adata.layers["velocity"], dtype=float)
+    gene_to_idx = {gene: idx for idx, gene in enumerate(genes)}
+
+    if "gene_role" in adata.var.columns:
+        masters = [str(g) for g in adata.var_names[adata.var["gene_role"].astype(str) == "master_regulator"]]
+        if masters:
+            add(max(masters, key=lambda gene: float(np.var(alpha[:, gene_to_idx[gene]]))))
+
+    branch = adata.obs["branch"].astype(str).to_numpy() if "branch" in adata.obs else np.array(["all"] * adata.n_obs)
+    b0 = branch == "branch_0"
+    b1 = branch == "branch_1"
+    if b0.any() and b1.any():
+        alpha_gap = np.abs(alpha[b0].mean(axis=0) - alpha[b1].mean(axis=0))
+        spliced_gap = np.abs(spliced[b0].mean(axis=0) - spliced[b1].mean(axis=0))
+        add(genes[int(np.argmax(alpha_gap + spliced_gap))])
+
+    add(genes[int(np.argmax(np.var(velocity, axis=0)))])
+
+    grn = _grn_dataframe(adata)
+    if not grn.empty and {"target", "sign"}.issubset(grn.columns):
+        for sign in ("activation", "repression"):
+            targets = [str(gene) for gene in grn.loc[grn["sign"].astype(str) == sign, "target"] if str(gene) in gene_to_idx]
+            if targets:
+                add(max(targets, key=lambda gene: float(np.var(alpha[:, gene_to_idx[gene]]))))
+
+    if len(selected) < 3:
+        warnings.warn("falling back to leading genes for representative gene selection", UserWarning, stacklevel=2)
+        for gene in genes:
+            add(gene)
+            if len(selected) >= 4:
+                break
+    return selected[:4]
 
 
-def _save(fig, output_path: str | Path | None):
+def _embedding(adata: Any, basis: str) -> np.ndarray:
+    key = f"X_{basis}"
+    if key not in adata.obsm:
+        raise KeyError(f"missing embedding adata.obsm[{key!r}]")
+    coords = np.asarray(adata.obsm[key], dtype=float)
+    if coords.shape[1] < 2:
+        raise ValueError(f"embedding {key!r} must have at least two dimensions")
+    return coords[:, :2]
+
+
+def _plot_embedding_by_category(adata: Any, output_path: Path, basis: str, color: str, title: str, dpi: int) -> None:
+    coords = _embedding(adata, basis)
+    fig, ax = plt.subplots(figsize=(5.2, 4.6))
+    if color not in adata.obs:
+        ax.scatter(coords[:, 0], coords[:, 1], s=18, alpha=0.8)
+    elif pd.api.types.is_numeric_dtype(adata.obs[color]):
+        values = adata.obs[color].to_numpy(dtype=float)
+        sc = ax.scatter(coords[:, 0], coords[:, 1], c=values, s=18, alpha=0.85, cmap="viridis")
+        fig.colorbar(sc, ax=ax, label=color)
+    else:
+        categories = adata.obs[color].astype(str).to_numpy()
+        for idx, category in enumerate(pd.unique(categories)):
+            mask = categories == category
+            ax.scatter(coords[mask, 0], coords[mask, 1], s=18, alpha=0.85, label=category)
+        ax.legend(frameon=False, fontsize=8)
+    ax.set_title(title)
+    ax.set_xlabel(f"{basis.upper()}1")
+    ax.set_ylabel(f"{basis.upper()}2")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_velocity_stream(adata: Any, output_path: Path, basis: str, dpi: int) -> None:
+    try:
+        import scvelo as scv
+    except ImportError as exc:
+        raise ImportError("scvelo is required for velocity stream plotting") from exc
+
+    fig, ax = plt.subplots(figsize=(5.4, 4.8))
+    scv.pl.velocity_embedding_stream(
+        adata,
+        basis=basis,
+        vkey="velocity",
+        color="branch" if "branch" in adata.obs else None,
+        title="Ground-truth RNA velocity stream",
+        show=False,
+        ax=ax,
+        legend_loc="right margin",
+    )
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_gene_dynamics(
+    data: Any,
+    genes: Iterable[str] | str,
+    output_path: str | Path | None = None,
+    quantities: tuple[str, ...] = ("true_alpha", "true_unspliced", "true_spliced", "true_velocity", "true_velocity_u"),
+):
+    """Plot selected gene quantities over pseudotime, grouped by branch."""
+
+    adata = prepare_adata(data, expression_layer="true") if not _is_anndata(data) else data.copy()
+    gene_list = [genes] if isinstance(genes, (str, int)) else list(genes)
+    names = [str(name) for name in adata.var_names]
+    pt = adata.obs["pseudotime"].to_numpy(dtype=float) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
+    branch = adata.obs["branch"].astype(str).to_numpy() if "branch" in adata.obs else np.array(["all"] * adata.n_obs)
+    fig, axes = plt.subplots(len(gene_list), len(quantities), figsize=(3.4 * len(quantities), 2.3 * len(gene_list)), squeeze=False)
+    for row, gene in enumerate(gene_list):
+        idx = int(gene) if isinstance(gene, int) else names.index(str(gene))
+        for col, layer in enumerate(quantities):
+            ax = axes[row, col]
+            if layer not in adata.layers:
+                ax.text(0.5, 0.5, f"missing {layer}", ha="center", va="center")
+                ax.set_axis_off()
+                continue
+            values = np.asarray(adata.layers[layer], dtype=float)[:, idx]
+            for category in pd.unique(branch):
+                mask = branch == category
+                order = np.argsort(pt[mask])
+                ax.plot(pt[mask][order], values[mask][order], ".", markersize=3, alpha=0.75, label=category)
+            if row == 0:
+                ax.set_title(layer)
+            if col == 0:
+                ax.set_ylabel(str(gene))
+            if row == len(gene_list) - 1:
+                ax.set_xlabel("pseudotime")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        axes[0, -1].legend(handles, labels, frameon=False, fontsize=8)
+    fig.tight_layout()
     if output_path is not None:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(path, dpi=160, bbox_inches="tight")
+        fig.savefig(path, dpi=180, bbox_inches="tight")
     return fig
 
 
-def _embedding_and_label(
-    data: Any,
-    embedding: np.ndarray | None,
-    method: str,
-    layer_preference: str,
-    random_state: int,
-) -> tuple[np.ndarray, str, np.ndarray]:
-    if embedding is not None:
-        _, components = compute_pca_embedding(data, layer_preference=layer_preference)
-        return embedding, "embedding", components
-    if method == "pca":
-        coords, components = compute_pca_embedding(data, layer_preference=layer_preference)
-        return coords, "pca", components
-    if method == "umap":
-        return compute_umap_embedding(data, random_state=random_state, layer_preference=layer_preference)
-    raise ValueError("method must be 'pca' or 'umap'")
+def plot_gene_dynamics_over_pseudotime(data: Any, gene: str | int, output_path: str | Path | None = None, **kwargs):
+    """Backward-compatible wrapper around ``plot_gene_dynamics``."""
+
+    return plot_gene_dynamics(data, [gene], output_path=output_path, **kwargs)
 
 
-def plot_embedding_by_pseudotime(
-    data: Any,
-    embedding: np.ndarray | None = None,
-    output_path: str | Path | None = None,
-    ax=None,
-    method: str = "pca",
-    layer_preference: str = "observed",
-    random_state: int = 0,
-):
-    """Scatter embedding colored by pseudotime using an explicit layer choice."""
+def plot_phase_portrait_gallery(*args, **kwargs):
+    """Backward-compatible wrapper around ``plot_phase_gallery``."""
 
-    embedding, method_used, _ = _embedding_and_label(data, embedding, method, layer_preference, random_state)
-    fig, ax = _new_ax(ax)
-    pts = ax.scatter(
-        embedding[:, 0],
-        embedding[:, 1],
-        c=_pseudotime(data),
-        cmap="viridis",
-        s=_point_size(embedding.shape[0]),
-        alpha=0.9,
-        linewidths=0,
-        rasterized=embedding.shape[0] > 800,
-    )
-    ax.set_title(f"{method_used.upper()} {layer_preference} by pseudotime")
-    ax.set_xlabel(f"{method_used.upper()} 1")
-    ax.set_ylabel(f"{method_used.upper()} 2")
-    fig.colorbar(pts, ax=ax, label="pseudotime")
-    return _save(fig, output_path)
+    return plot_phase_gallery(*args, **kwargs)
 
 
-def plot_embedding_by_branch(
-    data: Any,
-    embedding: np.ndarray | None = None,
-    output_path: str | Path | None = None,
-    ax=None,
-    method: str = "pca",
-    layer_preference: str = "observed",
-    random_state: int = 0,
-):
-    """Scatter embedding colored by branch label using an explicit layer choice."""
+def _plot_gene_dynamics(adata: Any, genes: Iterable[str], output_path: Path, dpi: int) -> None:
+    genes = list(genes)
+    layers = [("true_alpha", "alpha"), ("true_spliced", "spliced"), ("velocity", "velocity")]
+    pt = adata.obs["pseudotime"].to_numpy(dtype=float) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
+    branch = adata.obs["branch"].astype(str).to_numpy() if "branch" in adata.obs else np.array(["all"] * adata.n_obs)
+    fig, axes = plt.subplots(len(genes), len(layers), figsize=(4.0 * len(layers), 2.3 * len(genes)), squeeze=False)
+    for row, gene in enumerate(genes):
+        idx = list(map(str, adata.var_names)).index(str(gene))
+        for col, (layer, label) in enumerate(layers):
+            ax = axes[row, col]
+            if layer not in adata.layers:
+                ax.text(0.5, 0.5, f"missing {layer}", ha="center", va="center")
+                ax.set_axis_off()
+                continue
+            values = np.asarray(adata.layers[layer], dtype=float)[:, idx]
+            for category in pd.unique(branch):
+                mask = branch == category
+                order = np.argsort(pt[mask])
+                ax.plot(pt[mask][order], values[mask][order], ".", markersize=3, alpha=0.75, label=category)
+            if row == 0:
+                ax.set_title(label)
+            if col == 0:
+                ax.set_ylabel(f"{gene}")
+            if row == len(genes) - 1:
+                ax.set_xlabel("pseudotime")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        axes[0, -1].legend(handles, labels, frameon=False, fontsize=8)
+    fig.suptitle("Representative gene dynamics")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
 
-    embedding, method_used, _ = _embedding_and_label(data, embedding, method, layer_preference, random_state)
-    fig, ax = _new_ax(ax)
-    branches = _branch(data)
-    for idx, branch in enumerate(pd.unique(branches)):
-        mask = branches == branch
-        ax.scatter(
-            embedding[mask, 0],
-            embedding[mask, 1],
-            label=str(branch),
-            s=_point_size(mask.sum()),
-            color=_branch_color(str(branch), idx),
-            alpha=0.9,
-            linewidths=0,
-            rasterized=mask.sum() > 400,
-        )
-    ax.set_title(f"{method_used.upper()} {layer_preference} by branch")
-    ax.set_xlabel(f"{method_used.upper()} 1")
-    ax.set_ylabel(f"{method_used.upper()} 2")
-    ax.legend(frameon=False, fontsize=8)
-    return _save(fig, output_path)
 
-
-def plot_embedding_with_velocity(
-    data: Any,
-    embedding: np.ndarray | None = None,
-    output_path: str | Path | None = None,
-    ax=None,
-    stride: int | None = None,
-    scale: float | None = None,
-    max_arrow_length: float | None = None,
-    method: str = "pca",
-    layer_preference: str = "true",
-    random_state: int = 0,
-):
-    """Scatter embedding with projected true-velocity arrows.
-
-    The default is PCA on ``true_spliced``. Arrows are lightly subsampled and
-    length-clipped for readability. PCA velocity arrows are qualitative
-    quick-look diagnostics, not a full scVelo-style velocity embedding. If
-    ``method='umap'`` is explicitly requested, velocity arrows are PCA-projected
-    and overlaid on UMAP coordinates for qualitative visualization only.
-    """
-
-    embedding, method_used, pca_components = _embedding_and_label(data, embedding, method, layer_preference, random_state)
-    velocity = _matrix(data, "true_velocity")
-    projected = velocity @ pca_components.T
-    if projected.shape[1] < 2:
-        projected = np.pad(projected, ((0, 0), (0, 2 - projected.shape[1])))
-    n_cells = embedding.shape[0]
-    if stride is None:
-        stride = max(1, n_cells // 35)
-    if max_arrow_length is None:
-        x_span = float(np.ptp(embedding[:, 0]))
-        y_span = float(np.ptp(embedding[:, 1]))
-        max_arrow_length = 0.08 * max((x_span**2 + y_span**2) ** 0.5, 1e-12)
-    lengths = np.linalg.norm(projected[:, :2], axis=1)
-    too_long = lengths > max_arrow_length
-    if np.any(too_long):
-        projected = projected.copy()
-        projected[too_long, :2] *= (max_arrow_length / lengths[too_long])[:, None]
-    idx = np.arange(0, n_cells, stride)
-    fig, ax = _new_ax(ax)
-    ax.scatter(
-        embedding[:, 0],
-        embedding[:, 1],
-        c=_pseudotime(data),
-        cmap="Greys",
-        s=_point_size(n_cells, emphasis="dense"),
-        alpha=0.45,
-        linewidths=0,
-        rasterized=n_cells > 800,
-    )
-    ax.quiver(
-        embedding[idx, 0],
-        embedding[idx, 1],
-        projected[idx, 0],
-        projected[idx, 1],
-        angles="xy",
-        scale_units="xy",
-        scale=1.0 if scale is None else scale,
-        width=0.0026,
-        color="tab:red",
-        alpha=0.8,
-    )
-    if method_used == "umap":
-        title = "UMAP with PCA-projected true velocity (qualitative only)"
+def _phase_layers(adata: Any, mode: str = "true") -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    if mode not in {"true", "observed"}:
+        raise ValueError("mode must be 'true' or 'observed'")
+    if mode == "true":
+        s = _require_layer(adata, "true_spliced")
+        u = _require_layer(adata, "true_unspliced")
     else:
-        title = f"{method_used.upper()} {layer_preference} spliced with true velocity"
-    ax.set_title(title)
-    ax.set_xlabel(f"{method_used.upper()} 1")
-    ax.set_ylabel(f"{method_used.upper()} 2")
-    return _save(fig, output_path)
+        s = _require_layer(adata, "spliced")
+        u = _require_layer(adata, "unspliced")
+    ds = _require_layer(adata, "true_velocity") if "true_velocity" in adata.layers else _require_layer(adata, "velocity")
+    du = _require_layer(adata, "true_velocity_u") if "true_velocity_u" in adata.layers else None
+    return s, u, ds, du
 
 
 def plot_phase_portrait(
@@ -415,260 +433,228 @@ def plot_phase_portrait(
     output_path: str | Path | None = None,
     ax=None,
     mode: str = "true",
-    use_true: bool | None = None,
-    connect_by_pseudotime: bool = False,
+    color_by: str = "pseudotime",
+    show_velocity: bool = True,
+    arrow_stride: int | None = None,
 ):
-    """Plot unspliced versus spliced for one gene, colored by pseudotime.
+    """Plot a gene phase portrait with true 2D RNA velocity arrows.
 
-    ``mode='true'`` uses ``true_unspliced`` and ``true_spliced`` and is the
-    default because observed UMI counts can be highly discrete. ``mode='observed'``
-    uses ``unspliced`` and ``spliced`` and raises a clear error if they are absent.
-    ``use_true`` is retained as a backward-compatible alias.
+    The x-axis is spliced RNA and the y-axis is unspliced RNA. For true layers,
+    arrows use ``dx=true_velocity=ds/dt`` and ``dy=true_velocity_u=du/dt``.
     """
 
-    if use_true is not None:
-        mode = "true" if use_true else "observed"
-    if mode not in {"true", "observed"}:
-        raise ValueError("mode must be 'true' or 'observed'")
-    idx = _gene_index(data, gene)
-    if mode == "true":
-        u_layer, s_layer = "true_unspliced", "true_spliced"
-    else:
-        u_layer, s_layer = "unspliced", "spliced"
-    u = _matrix(data, u_layer)[:, idx]
-    s = _matrix(data, s_layer)[:, idx]
-    branches = _branch(data)
-    markers = ["o", "s", "^", "D", "P", "X"]
-    fig, ax = _new_ax(ax)
-    pts = None
-    for b_idx, branch in enumerate(pd.unique(branches)):
-        mask = branches == branch
-        branch_pt = _pseudotime(data)[mask]
-        pts = ax.scatter(
-            u[mask],
-            s[mask],
-            c=branch_pt,
-            cmap="viridis",
-            s=_point_size(mask.sum()),
-            marker=markers[b_idx % len(markers)],
-            edgecolors="black",
-            linewidths=0.2,
-            label=str(branch),
-            rasterized=mask.sum() > 400,
-        )
-        if connect_by_pseudotime:
-            order = np.argsort(branch_pt)
-            ax.plot(
-                u[mask][order],
-                s[mask][order],
-                color=_branch_color(str(branch), b_idx),
-                linewidth=0.8,
-                alpha=0.5,
-            )
-    ax.set_title(f"Phase portrait ({mode}): {_var_names(data)[idx]}")
-    ax.set_xlabel(f"{u_layer}")
-    ax.set_ylabel(f"{s_layer}")
-    ax.legend(frameon=False, fontsize=8)
-    if pts is not None:
-        fig.colorbar(pts, ax=ax, label="pseudotime")
-    return _save(fig, output_path)
-
-
-def plot_phase_portrait_gallery(
-    data: Any,
-    genes: list[str] | tuple[str, ...] | None = None,
-    output_path: str | Path | None = None,
-    mode: str = "true",
-    use_true: bool | None = None,
-    connect_by_pseudotime: bool = False,
-    max_cols: int = 6,
-    panel_size: float = 2.0,
-):
-    """Render phase portraits for many genes as a thumbnail grid.
-
-    This is intended for smaller datasets where inspecting every gene's
-    unspliced/spliced trajectory is practical. By default it uses the true
-    layers; observed layers can be requested with ``mode='observed'``.
-    """
-
-    if use_true is not None:
-        mode = "true" if use_true else "observed"
-    if mode not in {"true", "observed"}:
-        raise ValueError("mode must be 'true' or 'observed'")
-    gene_names = _var_names(data) if genes is None else [str(gene) for gene in genes]
-    if not gene_names:
-        raise ValueError("at least one gene is required for phase portrait gallery")
-    if max_cols <= 0:
-        raise ValueError("max_cols must be positive")
-
-    n_genes = len(gene_names)
-    n_cols = min(max_cols, n_genes)
-    n_rows = int(np.ceil(n_genes / n_cols))
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(panel_size * n_cols, panel_size * n_rows + 0.3),
-        constrained_layout=True,
-        squeeze=False,
-    )
-    axes_flat = axes.ravel()
-    for ax, gene in zip(axes_flat, gene_names):
-        plot_phase_portrait(
-            data,
-            gene,
-            ax=ax,
-            mode=mode,
-            connect_by_pseudotime=connect_by_pseudotime,
-        )
-        ax.set_title(str(gene), fontsize=8)
-        ax.legend_.remove() if ax.legend_ is not None else None
-        ax.tick_params(labelsize=7)
-        ax.xaxis.label.set_size(7)
-        ax.yaxis.label.set_size(7)
-    for ax in axes_flat[n_genes:]:
-        ax.axis("off")
-    fig.suptitle(f"Phase portrait gallery ({mode})", fontsize=12)
-    return _save(fig, output_path)
-
-
-def plot_gene_dynamics_over_pseudotime(
-    data: Any,
-    gene: str | int,
-    output_path: str | Path | None = None,
-    ax=None,
-    include_velocity_u: bool = False,
-):
-    """Plot true alpha, u/s, velocity, and optional velocity_u over pseudotime."""
-
-    idx = _gene_index(data, gene)
-    pt = _pseudotime(data)
-    branches = _branch(data)
-    quantities = {
-        "true_alpha": _matrix(data, "true_alpha")[:, idx],
-        "true_unspliced": _matrix(data, "true_unspliced")[:, idx],
-        "true_spliced": _matrix(data, "true_spliced")[:, idx],
-        "true_velocity": _matrix(data, "true_velocity")[:, idx],
-    }
-    if include_velocity_u:
-        quantities["true_velocity_u"] = _matrix(data, "true_velocity_u")[:, idx]
-    n_panels = len(quantities)
+    adata = prepare_adata(data, expression_layer="true") if not _is_anndata(data) else data.copy()
+    names = [str(name) for name in adata.var_names]
+    idx = int(gene) if isinstance(gene, int) else names.index(str(gene))
+    s, u, ds, du = _phase_layers(adata, mode=mode)
     if ax is None:
-        fig, axes = plt.subplots(n_panels, 1, figsize=(7.2, 2.0 * n_panels + 0.6), sharex=True)
+        fig, ax = plt.subplots(figsize=(4.2, 3.8))
     else:
         fig = ax.figure
-        axes = [ax]
-    axes = np.atleast_1d(axes)
-    for q_idx, (name, values) in enumerate(quantities.items()):
-        current_ax = axes[q_idx] if len(axes) > 1 else axes[0]
-        for b_idx, branch in enumerate(pd.unique(branches)):
-            mask = branches == branch
-            order = np.argsort(pt[mask])
-            current_ax.plot(
-                pt[mask][order],
-                values[mask][order],
-                marker="o",
-                markersize=2.5,
-                linewidth=1.2,
-                color=_branch_color(str(branch), b_idx),
-                label=str(branch),
-            )
-        current_ax.set_ylabel(name)
-        if q_idx == 0:
-            current_ax.set_title(f"Gene dynamics: {_var_names(data)[idx]}")
-        if np.any(branches == "trunk"):
-            trunk_max = float(pt[branches == "trunk"].max())
-            current_ax.axvline(trunk_max, color="0.7", linestyle="--", linewidth=0.8)
-    axes[-1].set_xlabel("pseudotime")
-    handles, labels = axes[0].get_legend_handles_labels()
-    if handles:
-        axes[0].legend(handles, labels, frameon=False, fontsize=8)
-    return _save(fig, output_path)
-
-
-def plot_overview_panel(
-    noisy: Any,
-    lownoise: Any | None = None,
-    output_path: str | Path | None = None,
-    random_state: int = 0,
-):
-    """Create one quick-look panel for trajectory, branch, velocity, and noise views."""
-
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
-    plot_embedding_by_pseudotime(noisy, method="pca", layer_preference="true", ax=axes[0, 0])
-    plot_embedding_by_branch(noisy, method="pca", layer_preference="true", ax=axes[0, 1])
-    plot_embedding_with_velocity(noisy, method="pca", layer_preference="true", ax=axes[0, 2])
-    plot_embedding_by_branch(noisy, method="pca", layer_preference="observed", ax=axes[1, 0])
-    _, umap_method, _ = compute_umap_embedding(noisy, random_state=random_state, layer_preference="observed")
-    if umap_method == "umap":
-        plot_embedding_by_branch(noisy, method="umap", layer_preference="observed", random_state=random_state, ax=axes[1, 1])
+    if color_by in adata.obs:
+        values = adata.obs[color_by].to_numpy()
+        if pd.api.types.is_numeric_dtype(adata.obs[color_by]):
+            pts = ax.scatter(s[:, idx], u[:, idx], c=values.astype(float), cmap="viridis", s=18, alpha=0.82)
+            fig.colorbar(pts, ax=ax, label=color_by)
+        else:
+            cats = adata.obs[color_by].astype(str).to_numpy()
+            for category in pd.unique(cats):
+                mask = cats == category
+                ax.scatter(s[mask, idx], u[mask, idx], s=18, alpha=0.82, label=category)
+            ax.legend(frameon=False, fontsize=8)
     else:
-        plot_embedding_by_pseudotime(noisy, method="pca", layer_preference="observed", ax=axes[1, 1])
-    if lownoise is not None:
-        plot_embedding_by_branch(lownoise, method="pca", layer_preference="observed", ax=axes[1, 2])
-        axes[1, 2].set_title("PCA observed_lownoise by branch")
-    else:
-        axes[1, 2].axis("off")
-    return _save(fig, output_path)
+        ax.scatter(s[:, idx], u[:, idx], s=18, alpha=0.82)
+    if show_velocity and du is not None:
+        order = np.argsort(adata.obs["pseudotime"].to_numpy(dtype=float)) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
+        stride = arrow_stride or max(1, len(order) // 30)
+        q_idx = order[::stride]
+        ax.quiver(
+            s[q_idx, idx],
+            u[q_idx, idx],
+            ds[q_idx, idx],
+            du[q_idx, idx],
+            angles="xy",
+            scale_units="xy",
+            scale=1.0,
+            width=0.003,
+            color="0.25",
+            alpha=0.6,
+        )
+    ax.set_title(f"Phase portrait: {names[idx]}")
+    ax.set_xlabel("spliced RNA")
+    ax.set_ylabel("unspliced RNA")
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=180, bbox_inches="tight")
+    return fig
 
 
-def plot_selected_gene_panel(
+def plot_phase_gallery(
     data: Any,
-    selected: dict[str, str],
+    genes: Iterable[str] | None = None,
     output_path: str | Path | None = None,
-    include_velocity_u: bool = True,
+    mode: str = "true",
+    color_by: str | None = None,
+    max_cols: int = 5,
+    panel_size: float = 2.2,
 ):
-    """Create one panel that summarizes representative genes.
+    """Plot a thumbnail grid of gene phase portraits."""
 
-    Layout: one row per selected gene, columns are true phase portrait,
-    observed phase portrait, and gene dynamics.
+    adata = prepare_adata(data, expression_layer="true") if not _is_anndata(data) else data.copy()
+    gene_names = [str(g) for g in adata.var_names] if genes is None else [str(g) for g in genes]
+    if not gene_names:
+        raise ValueError("at least one gene is required")
+    n_cols = min(max_cols, len(gene_names))
+    n_rows = int(np.ceil(len(gene_names) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(panel_size * n_cols, panel_size * n_rows), squeeze=False)
+    for ax, gene in zip(axes.ravel(), gene_names):
+        plot_phase_portrait(adata, gene, ax=ax, mode=mode, color_by=color_by or "", show_velocity=False)
+        ax.set_title(str(gene), fontsize=8)
+        ax.tick_params(labelsize=7)
+    for ax in axes.ravel()[len(gene_names):]:
+        ax.axis("off")
+    fig.tight_layout()
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=180, bbox_inches="tight")
+    return fig
+
+
+def _plot_phase_portraits(adata: Any, genes: Iterable[str], output_path: Path, dpi: int) -> None:
+    genes = list(genes)
+    fig = plot_phase_gallery(adata, genes=genes, mode="true", max_cols=len(genes), output_path=None)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_showcase_panel(adata: Any, output_path: Path, basis: str, dpi: int) -> None:
+    coords = _embedding(adata, basis)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), constrained_layout=True)
+    branch = adata.obs["branch"].astype(str).to_numpy() if "branch" in adata.obs else np.array(["all"] * adata.n_obs)
+    for category in pd.unique(branch):
+        mask = branch == category
+        axes[0].scatter(coords[mask, 0], coords[mask, 1], s=14, alpha=0.85, label=category)
+    axes[0].legend(frameon=False, fontsize=8)
+    axes[0].set_title("Branch")
+    pt = adata.obs["pseudotime"].to_numpy(dtype=float) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
+    sc = axes[1].scatter(coords[:, 0], coords[:, 1], c=pt, s=14, alpha=0.85, cmap="viridis")
+    fig.colorbar(sc, ax=axes[1], label="pseudotime")
+    axes[1].set_title("Pseudotime")
+    if f"velocity_{basis}" in adata.obsm:
+        vel = np.asarray(adata.obsm[f"velocity_{basis}"], dtype=float)
+        stride = max(1, adata.n_obs // 80)
+        axes[2].scatter(coords[:, 0], coords[:, 1], c="0.82", s=8)
+        axes[2].quiver(
+            coords[::stride, 0],
+            coords[::stride, 1],
+            vel[::stride, 0],
+            vel[::stride, 1],
+            angles="xy",
+            scale_units="xy",
+            scale=1.0,
+            width=0.003,
+            color="0.2",
+        )
+        axes[2].set_title("Ground-truth velocity")
+    else:
+        axes[2].text(0.5, 0.5, "velocity embedding unavailable", ha="center", va="center")
+        axes[2].set_axis_off()
+    for ax in axes[:2]:
+        ax.set_xlabel(f"{basis.upper()}1")
+        ax.set_ylabel(f"{basis.upper()}2")
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_showcase(
+    data: Any,
+    output_dir: str | Path,
+    expression_layer: str = "true",
+    basis: str = "umap",
+    n_pcs: int = 20,
+    n_neighbors: int = 15,
+    min_dist: float = 0.3,
+    representative_genes: Any = "auto",
+    dpi: int = 300,
+    random_state: int = 0,
+) -> dict[str, Any]:
+    """Create a scanpy/scVelo RNA velocity-style showcase panel.
+
+    The stream plot is a ground-truth velocity stream based on NVSim
+    ``true_velocity`` copied to ``adata.layers["velocity"]``. It is not scVelo
+    inferred velocity.
     """
 
-    n_rows = len(selected)
-    fig = plt.figure(figsize=(16, 4.3 * n_rows), constrained_layout=True)
-    outer = fig.add_gridspec(n_rows, 3, width_ratios=[1.0, 1.0, 1.35])
-    for row, (label, gene) in enumerate(selected.items()):
-        ax_true = fig.add_subplot(outer[row, 0])
-        plot_phase_portrait(data, gene, mode="true", connect_by_pseudotime=True, ax=ax_true)
-        ax_true.set_title(f"{label}: {gene} true phase")
-        ax_obs = fig.add_subplot(outer[row, 1])
-        try:
-            plot_phase_portrait(data, gene, mode="observed", connect_by_pseudotime=False, ax=ax_obs)
-            ax_obs.set_title(f"{label}: {gene} observed phase")
-        except KeyError:
-            ax_obs.axis("off")
-        dynamic_names = ["true_alpha", "true_unspliced", "true_spliced", "true_velocity"]
-        if include_velocity_u:
-            dynamic_names.append("true_velocity_u")
-        inner = outer[row, 2].subgridspec(len(dynamic_names), 1, hspace=0.05)
-        values_map = {name: _matrix(data, name)[:, _gene_index(data, gene)] for name in dynamic_names}
-        pt = _pseudotime(data)
-        branches = _branch(data)
-        branch_values = pd.unique(branches)
-        trunk_max = float(pt[branches == "trunk"].max()) if np.any(branches == "trunk") else None
-        for q_idx, name in enumerate(dynamic_names):
-            ax_dyn = fig.add_subplot(inner[q_idx, 0])
-            for b_idx, branch in enumerate(branch_values):
-                mask = branches == branch
-                order = np.argsort(pt[mask])
-                ax_dyn.plot(
-                    pt[mask][order],
-                    values_map[name][mask][order],
-                    marker="o",
-                    markersize=2.2,
-                    linewidth=1.0,
-                    color=_branch_color(str(branch), b_idx),
-                    label=str(branch) if q_idx == 0 else None,
-                )
-            if trunk_max is not None:
-                ax_dyn.axvline(trunk_max, color="0.7", linestyle="--", linewidth=0.8)
-            ax_dyn.set_ylabel(name, fontsize=8)
-            if q_idx == 0:
-                ax_dyn.set_title(f"{label}: {gene} dynamics")
-                handles, labels = ax_dyn.get_legend_handles_labels()
-                if handles:
-                    ax_dyn.legend(handles, labels, frameon=False, fontsize=7, ncol=min(3, len(handles)))
-            if q_idx != len(dynamic_names) - 1:
-                ax_dyn.set_xticklabels([])
-            else:
-                ax_dyn.set_xlabel("pseudotime")
-    return _save(fig, output_path)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    summary: dict[str, Any] = {
+        "expression_layer": expression_layer,
+        "velocity_layer": "true_velocity",
+        "basis": basis,
+        "scanpy_embedding": "not_run",
+        "scvelo_velocity": "not_run",
+        "files": {},
+    }
+
+    adata = prepare_adata(data, expression_layer=expression_layer, velocity_layer="true_velocity", copy=True)
+    embed(
+        adata,
+        n_pcs=n_pcs,
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        basis=basis,
+        random_state=random_state,
+        copy=False,
+    )
+    summary["scanpy_embedding"] = "ok"
+
+    branch_path = output_path / "embedding_by_branch.png"
+    _plot_embedding_by_category(adata, branch_path, basis, "branch", "Expression manifold by branch", dpi)
+    summary["files"]["embedding_by_branch"] = str(branch_path)
+
+    pt_path = output_path / "embedding_by_pseudotime.png"
+    _plot_embedding_by_category(adata, pt_path, basis, "pseudotime", "Expression manifold by pseudotime", dpi)
+    summary["files"]["embedding_by_pseudotime"] = str(pt_path)
+
+    try:
+        velocity_stream(adata, basis=basis, velocity_layer="velocity")
+        stream_path = output_path / "velocity_stream_true.png"
+        _plot_velocity_stream(adata, stream_path, basis, dpi)
+        summary["scvelo_velocity"] = "ok"
+        summary["files"]["velocity_stream_true"] = str(stream_path)
+    except Exception as exc:
+        msg = str(exc)
+        warnings.warn(msg, UserWarning, stacklevel=2)
+        (output_path / "velocity_stream_true_ERROR.txt").write_text(msg + "\n", encoding="utf-8")
+        summary["scvelo_velocity"] = "failed"
+        summary["scvelo_error"] = msg
+
+    selected = select_genes(adata, representative_genes=representative_genes)
+    summary["representative_genes"] = selected
+
+    dynamics_path = output_path / "gene_dynamics_representative.png"
+    _plot_gene_dynamics(adata, selected, dynamics_path, dpi)
+    summary["files"]["gene_dynamics_representative"] = str(dynamics_path)
+
+    phase_path = output_path / "phase_portrait_representative.png"
+    _plot_phase_portraits(adata, selected, phase_path, dpi)
+    summary["files"]["phase_portrait_representative"] = str(phase_path)
+
+    panel_path = output_path / "velocity_showcase_panel.png"
+    _plot_showcase_panel(adata, panel_path, basis, dpi)
+    summary["files"]["velocity_showcase_panel"] = str(panel_path)
+
+    summary_path = output_path / "showcase_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    summary["files"]["showcase_summary"] = str(summary_path)
+    return summary
+
+
+# Descriptive aliases retained for readability and backward compatibility.
+prepare_velocity_adata = prepare_adata
+run_scanpy_embedding = embed
+run_scvelo_velocity_stream = velocity_stream
+select_velocity_showcase_genes = select_genes
+plot_velocity_showcase = plot_showcase

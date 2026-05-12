@@ -17,21 +17,18 @@ if str(ROOT) not in sys.path:
 from nvsim.grn import GRN
 from nvsim.output import to_anndata
 from nvsim.plotting import (
-    compute_umap_embedding,
-    plot_embedding_by_branch,
-    plot_embedding_by_pseudotime,
-    plot_embedding_with_velocity,
-    plot_gene_dynamics_over_pseudotime,
+    plot_gene_dynamics,
     plot_phase_portrait,
-    plot_phase_portrait_gallery,
-    select_representative_genes_by_dynamics,
+    plot_phase_gallery,
+    plot_showcase,
+    prepare_adata,
+    select_genes,
 )
 from nvsim.production import StateProductionProfile
 from nvsim.simulate import simulate_bifurcation
 
 DATA_DIR = ROOT / "data" / "external" / "trrust_mouse"
 OUTPUT_DIR = ROOT / "examples" / "outputs" / "trrust_mouse_small"
-ENABLE_UMAP = False
 GRN_COLUMNS = ["regulator", "target", "sign", "K", "half_response", "hill_coefficient"]
 
 
@@ -145,39 +142,22 @@ def quality_check_result(result: dict) -> tuple[dict[str, object], list[str]]:
 
 def save_visualizations(result: dict, output_dir: Path) -> dict[str, object]:
     plots_dir = output_dir / "plots"
-    true_dir = plots_dir / "true"
-    observed_dir = plots_dir / "observed"
     diagnostics_dir = plots_dir / "diagnostics"
-    for directory in [true_dir, observed_dir, diagnostics_dir]:
+    for directory in [plots_dir, diagnostics_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
-    selection = select_representative_genes_by_dynamics(result, result["uns"]["true_grn"])
-    selected_genes = list(dict.fromkeys(selection["genes"].values()))
-    plot_embedding_by_pseudotime(result, method="pca", layer_preference="true", output_path=true_dir / "embedding_pca_true_by_pseudotime.png")
-    plot_embedding_by_branch(result, method="pca", layer_preference="true", output_path=true_dir / "embedding_pca_true_by_branch.png")
-    plot_embedding_with_velocity(result, method="pca", layer_preference="true", output_path=true_dir / "embedding_pca_true_with_velocity.png")
-    plot_embedding_by_pseudotime(result, method="pca", layer_preference="observed", output_path=observed_dir / "embedding_pca_observed_by_pseudotime.png")
-    plot_embedding_by_branch(result, method="pca", layer_preference="observed", output_path=observed_dir / "embedding_pca_observed_by_branch.png")
-    method_used = "disabled"
-    if ENABLE_UMAP:
-        embedding, method_used, _ = compute_umap_embedding(result, random_state=1, layer_preference="observed")
-        if method_used == "umap":
-            plot_embedding_by_pseudotime(result, embedding=embedding, method="umap", layer_preference="observed", output_path=observed_dir / "embedding_umap_observed_by_pseudotime.png")
-            plot_embedding_by_branch(result, embedding=embedding, method="umap", layer_preference="observed", output_path=observed_dir / "embedding_umap_observed_by_branch.png")
-    plot_phase_portrait_gallery(result, genes=selected_genes, mode="true", output_path=true_dir / "phase_portrait_gallery_true.png")
-    plot_phase_portrait_gallery(result, genes=selected_genes, mode="observed", output_path=observed_dir / "phase_portrait_gallery_observed.png")
-    for label, gene in selection["genes"].items():
-        plot_phase_portrait(result, gene, mode="true", output_path=true_dir / f"phase_portrait_{label}_{gene}_true.png")
-        plot_gene_dynamics_over_pseudotime(result, gene, include_velocity_u=True, output_path=diagnostics_dir / f"gene_dynamics_{label}_{gene}.png")
-    selected_lines = []
-    for label, gene in selection["genes"].items():
-        selected_lines.append(f"{label}: {gene}")
-        selected_lines.append(f"  alpha_difference: {selection['alpha_differences'][label]:.6g}")
-    (diagnostics_dir / "selected_genes.txt").write_text("\n".join(selected_lines) + "\n", encoding="utf-8")
+    showcase = plot_showcase(result, output_dir=plots_dir / "velocity_showcase", expression_layer="true", random_state=1)
+    adata = prepare_adata(result, expression_layer="true")
+    selected_genes = select_genes(adata)
+    plot_phase_gallery(result, genes=selected_genes, mode="true", output_path=diagnostics_dir / "phase_gallery_true.png")
+    plot_phase_gallery(result, genes=selected_genes, mode="observed", output_path=diagnostics_dir / "phase_gallery_observed.png")
+    plot_gene_dynamics(result, selected_genes, output_path=diagnostics_dir / "gene_dynamics_selected.png")
+    for gene in selected_genes:
+        plot_phase_portrait(result, gene, mode="true", output_path=diagnostics_dir / f"phase_portrait_{gene}_true.png")
+    (diagnostics_dir / "selected_genes.txt").write_text("\n".join(selected_genes) + "\n", encoding="utf-8")
     return {
-        "selected_genes": selection["genes"],
-        "alpha_differences": selection["alpha_differences"],
-        "umap_available": bool(method_used == "umap"),
+        "selected_genes": selected_genes,
+        "showcase": showcase,
     }
 
 

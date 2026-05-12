@@ -29,39 +29,26 @@ These are the supported example workflows.
 - `run_bifurcation_state_anchor.py`: focused example of the `state_anchor`
   interface with `trunk_state`, `branch_child_states`, and
   `transition_schedule`.
-- `run_trrust_mouse_small.py`: external TRRUST mouse benchmark example driven
-  by a prepared signed GRN and master-regulator production profile.
 
 ### Plotting
 
-- `plot_linear.py`: generates quick-look figures under
-  `examples/outputs/linear_20gene/plots/`.
-- `plot_bifurcation.py`: generates quick-look figures under
-  `examples/outputs/bifurcation_20gene_3master/plots/` and writes
-  `diagnostics/selected_genes.txt`.
-- `plot_velocity_showcase.py`: uses scanpy/scVelo to generate RNA
-  velocity-style showcase figures under `examples/outputs/velocity_showcase/`.
-  This script requires the optional `velocity` dependencies.
+- `plot_velocity_showcase.py`: uses `nvsim.plotting` to generate scanpy/scVelo
+  RNA velocity-style showcase figures under
+  `examples/outputs/velocity_showcase/`.
 
-`nvsim.plotting` remains the lightweight diagnostics layer for quick PCA,
-phase portraits, and gene dynamics. `nvsim.velocity_plotting` is the higher
-level scanpy/scVelo workflow for publication-style velocity panels.
+`nvsim.plotting` is the single public plotting module. It delegates
+PCA/neighbors/UMAP to scanpy and velocity stream visualization to scVelo, while
+keeping NVSim-specific diagnostics such as gene dynamics and two-dimensional
+gene phase portraits.
 
 ## Recommended Check Commands
 
 ```bash
 python examples/tutorial.py
 python examples/run_mvp_linear.py
-python examples/plot_linear.py
 python examples/run_mvp_bifurcation.py
-python examples/plot_bifurcation.py
 python examples/run_linear_continuous_program.py
 python examples/run_bifurcation_state_anchor.py
-```
-
-Optional velocity showcase command, requiring scanpy and scVelo:
-
-```bash
 python examples/plot_velocity_showcase.py
 ```
 
@@ -79,5 +66,3 @@ Current generated output groups are:
   example.
 - `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
   showcase plots.
-- `examples/outputs/trrust_mouse_small/`: external TRRUST mouse benchmark
-  example.

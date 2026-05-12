@@ -12,14 +12,13 @@ dependencies = [
     "numpy",
     "pandas",
     "matplotlib",
+    "anndata",
+    "scanpy",
+    "scvelo",
 ]
 
 [project.optional-dependencies]
-anndata = ["anndata"]
-umap = ["umap-learn"]
-plotting = ["umap-learn"]
-velocity = ["scanpy", "scvelo"]
-dev = ["pytest", "anndata", "umap-learn"]
+dev = ["pytest"]
 
 [tool.setuptools.packages.find]
 include = ["nvsim*"]

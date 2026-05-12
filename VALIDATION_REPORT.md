@@ -74,9 +74,9 @@ Status: satisfied for v0.1.
 - Snapshot cells are sampled reproducibly with a deterministic seed.
 - True and observed layers are separated.
 - `examples/run_mvp_linear.py` runs and writes `examples/mvp_linear.h5ad` when AnnData is available.
-- `examples/plot_linear.py` writes organized plots under `examples/plots_linear/`.
-- True PCA by pseudotime is the primary visual diagnostic for smooth underlying dynamics.
-- Velocity arrows are qualitative PCA diagnostics.
+- `examples/plot_velocity_showcase.py` writes scanpy/scVelo velocity showcase plots under `examples/outputs/velocity_showcase/`.
+- True-layer UMAP by pseudotime is the primary visual diagnostic for smooth underlying dynamics.
+- Phase portraits use gene-level 2D velocity arrows from `true_velocity=ds/dt` and `true_velocity_u=du/dt`.
 
 ## E. Bifurcation Simulation
 

@@ -11,13 +11,13 @@ if str(ROOT) not in sys.path:
 
 from run_mvp_bifurcation import build_bifurcation_result
 
-from nvsim.velocity_plotting import plot_velocity_showcase
+from nvsim.plotting import plot_showcase
 
 
 def main() -> None:
     result = build_bifurcation_result(capture_rate=1.0, dropout_rate=0.0, poisson_observed=False)
     output_dir = Path(__file__).with_name("outputs") / "velocity_showcase"
-    summary = plot_velocity_showcase(
+    summary = plot_showcase(
         result,
         output_dir=output_dir,
         expression_layer="true",

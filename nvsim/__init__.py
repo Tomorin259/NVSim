@@ -25,6 +25,7 @@ from .production import (
     sigmoid_increase,
     transition_weight,
 )
+from .modes import DifferentiationGraph
 
 # Simulation and observed-layer generation.
 from .simulate import (
@@ -76,13 +77,13 @@ __all__ = [
     "simulate",
     "AlphaProgram",
     "StateProductionProfile",
+    "DifferentiationGraph",
     "constant",
     "linear_increase",
     "linear_decrease",
     "sigmoid_increase",
     "sigmoid_decrease",
     "transition_weight",
-    "simulate",
     "simulate_linear",
     "simulate_bifurcation",
     "generate_observed_counts",

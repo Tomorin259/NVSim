@@ -316,5 +316,7 @@ def test_calibrate_grn_half_response_uses_fallback_for_cyclic_grn():
     production = pd.DataFrame({"g0": [2.0]}, index=["bin_0"])
     calibrated, meta = calibrate_grn_half_response(grn, production, fallback_half_response=1.5)
     edges = calibrated.to_dataframe()
-    assert meta["calibration_method"] == "fallback_for_cyclic_grn"
-    assert np.allclose(edges["half_response"], [1.5, 1.5])
+    assert meta["actual_calibration"] == "cyclic"
+    assert meta["converged"] is True
+    assert np.all(np.isfinite(edges["half_response"]))
+    assert np.all(edges["half_response"] > 0)

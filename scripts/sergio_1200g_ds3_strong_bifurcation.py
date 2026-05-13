@@ -42,7 +42,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--transition-midpoint", type=float, default=0.25)
     parser.add_argument("--transition-steepness", type=float, default=20.0)
     parser.add_argument("--regulator-activity", choices=["spliced", "unspliced", "total"], default="unspliced")
-    parser.add_argument("--auto-calibrate-half-response", choices=["if_missing", "true", "false"], default="if_missing")
+    parser.add_argument("--half-response-calibration", choices=["off", "auto", "topology_propagation", "cyclic"], default="auto")
     parser.add_argument("--dt", type=float, default=0.02)
     parser.add_argument("--capture-rate", type=float, default=1.0)
     parser.add_argument("--poisson-observed", action="store_true")
@@ -57,13 +57,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--state-time", type=float, default=6.0)
     return parser.parse_args()
 
-
-def _auto_calibration_value(value: str) -> bool | str:
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    return "if_missing"
 
 
 def _required_file(dataset_dir: Path, name: str) -> Path:
@@ -183,7 +176,7 @@ def main() -> None:
         poisson_observed=args.poisson_observed,
         dropout_rate=args.dropout_rate,
         regulator_activity=args.regulator_activity,
-        auto_calibrate_half_response=_auto_calibration_value(args.auto_calibrate_half_response),
+        half_response_calibration=args.half_response_calibration,
         transition_schedule=args.transition_schedule,
         transition_midpoint=args.transition_midpoint,
         transition_steepness=args.transition_steepness,

@@ -105,8 +105,8 @@ def test_branching_can_auto_calibrate_missing_half_response():
         genes=["g0", "g1", "g2", "g3"],
         master_regulators=["g0", "g1"],
     )
-    result = simulate(grn, **_branching_kwargs(), auto_calibrate_half_response="if_missing")
-    assert result["uns"]["simulation_config"]["auto_calibrate_half_response"] == "if_missing"
+    result = simulate(grn, **_branching_kwargs(), half_response_calibration="auto")
+    assert result["uns"]["simulation_config"]["half_response_calibration"] == "auto"
 
 
 def test_branching_regulator_activity_modes_change_dynamics():

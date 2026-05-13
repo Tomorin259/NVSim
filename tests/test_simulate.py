@@ -137,18 +137,6 @@ def test_sampling_replacement_can_be_enabled_and_is_recorded():
     assert result["uns"]["simulation_config"]["sampling_replace"] is True
 
 
-def test_continuous_program_supports_state_specific_program_overrides():
-    grn = _small_grn()
-    result = simulate(
-        grn,
-        **_chain_kwargs(),
-        state_master_programs={"late": {"g0": linear_increase(1.0, 1.5), "g1": 0.1}},
-    )
-
-    assert result["uns"]["simulation_config"]["state_master_programs_enabled"] is True
-    assert result["uns"]["state_initialization"]["late"]["source"] == "parent_terminal_state"
-
-
 def test_explicit_initial_state_is_recorded_for_roots():
     grn = _small_grn()
     kwargs = _chain_kwargs()
@@ -159,10 +147,11 @@ def test_explicit_initial_state_is_recorded_for_roots():
     assert result["uns"]["state_initialization"]["early"]["source"] == "explicit_initial_state"
 
 
-def test_auto_half_response_calibration_requires_profile():
+def test_auto_half_response_calibration_works_for_continuous_program():
     grn = _small_grn_missing_half_response()
-    with pytest.raises(ValueError, match="production_profile must be provided"):
-        simulate(grn, **_chain_kwargs(), auto_calibrate_half_response="if_missing")
+    result = simulate(grn, **_chain_kwargs(), half_response_calibration="auto")
+    assert result["uns"]["simulation_config"]["half_response_calibration"] == "auto"
+    assert result["uns"]["grn_calibration"]["actual_calibration"] == "topology_propagation"
 
 
 def test_invalid_regulator_activity_is_rejected():

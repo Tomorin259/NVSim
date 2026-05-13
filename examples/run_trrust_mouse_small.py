@@ -75,7 +75,7 @@ def build_trrust_mouse_bifurcation_result(seed: int = 1) -> dict:
         poisson_observed=False,
         dropout_rate=0.0,
         regulator_activity="spliced",
-        auto_calibrate_half_response=False,
+        half_response_calibration="off",
     )
 
 

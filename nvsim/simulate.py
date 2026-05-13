@@ -18,7 +18,13 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from .grn import GRN, build_graph_levels, calibrate_grn_half_response, estimate_state_mean_expression
+from .grn import (
+    GRN,
+    HALF_RESPONSE_CALIBRATIONS,
+    build_graph_levels,
+    calibrate_grn_half_response,
+    estimate_state_mean_expression,
+)
 from .modes import StateGraph, DifferentiationGraph, coerce_graph
 from .noise import _resolve_capture_model_name, generate_observed_counts
 from .output import make_result_dict
@@ -28,7 +34,7 @@ from .regulation import compute_alpha
 
 SIMULATION_MODES = {"sergio_differentiation"}
 INITIALIZATION_POLICIES = {"parent_steady_state", "parent_terminal"}
-SAMPLING_POLICIES = {"uniform_snapshot", "state_transient"}
+SAMPLING_POLICIES = {"state_transient"}
 
 
 def _gene_index(genes: list[str] | tuple[str, ...]) -> pd.Index:
@@ -747,7 +753,7 @@ def _resolve_mode_defaults(
     sampling_policy: str | None,
     transition_schedule: str | None,
     regulator_activity: str | None,
-    auto_calibrate_half_response: bool | str | None,
+    half_response_calibration: str | None,
 ) -> dict[str, object]:
     resolved_graph = coerce_graph(graph)
     resolved_mode = None if simulation_mode is None else str(simulation_mode).strip().lower()
@@ -760,7 +766,7 @@ def _resolve_mode_defaults(
     resolved_sampling_policy = sampling_policy
     resolved_transition_schedule = transition_schedule
     resolved_regulator_activity = regulator_activity
-    resolved_auto_calibration = auto_calibrate_half_response
+    resolved_half_response_calibration = half_response_calibration
 
     if resolved_mode == "sergio_differentiation":
         if production_profile is None:
@@ -784,8 +790,8 @@ def _resolve_mode_defaults(
             resolved_transition_schedule = "step"
         if resolved_regulator_activity is None:
             resolved_regulator_activity = "unspliced"
-        if resolved_auto_calibration is None:
-            resolved_auto_calibration = "if_missing"
+        if resolved_half_response_calibration is None:
+            resolved_half_response_calibration = "auto"
 
     if resolved_graph is None:
         raise ValueError("graph must be provided; graph is now the only supported simulator topology")
@@ -801,8 +807,8 @@ def _resolve_mode_defaults(
         resolved_transition_schedule = "sigmoid"
     if resolved_regulator_activity is None:
         resolved_regulator_activity = "spliced"
-    if resolved_auto_calibration is None:
-        resolved_auto_calibration = False
+    if resolved_half_response_calibration is None:
+        resolved_half_response_calibration = "off"
 
     if resolved_initialization_policy not in INITIALIZATION_POLICIES:
         raise ValueError(f"initialization_policy must be one of {sorted(INITIALIZATION_POLICIES)}")
@@ -818,7 +824,7 @@ def _resolve_mode_defaults(
         "sampling_policy": resolved_sampling_policy,
         "transition_schedule": resolved_transition_schedule,
         "regulator_activity": resolved_regulator_activity,
-        "auto_calibrate_half_response": resolved_auto_calibration,
+        "half_response_calibration": resolved_half_response_calibration,
     }
 
 def _steady_state_table_from_source_rates(
@@ -872,15 +878,13 @@ def _source_rates_from_program_starts(
     total_program_time: float,
     master_genes: tuple[str, ...],
     base_programs: Mapping[str, AlphaProgram],
-    state_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None,
 ) -> pd.DataFrame:
     rows: dict[str, dict[str, float]] = {}
     total = max(float(total_program_time), 1e-8)
     for state in states:
-        merged = _merge_programs(base_programs, None if state_master_programs is None else state_master_programs.get(state))
         normalized_t = float(np.clip(float(state_offsets[state]) / total, 0.0, 1.0))
         rows[str(state)] = {
-            gene: float(merged.get(gene, constant(0.0)).value(normalized_t))
+            gene: float(base_programs.get(gene, constant(0.0)).value(normalized_t))
             for gene in master_genes
         }
     return pd.DataFrame.from_dict(rows, orient="index").reindex(index=list(states), columns=list(master_genes), fill_value=0.0)
@@ -936,14 +940,25 @@ def _grn_calibration_summary(
         return dict(grn_calibration)
 
     level_info = build_graph_levels(grn, explicit_master_regulators=master_genes)
+    missing = int(grn.edges["half_response"].isna().sum())
     return {
-        "calibration_method": "not_recorded",
+        "requested_calibration": "off",
+        "actual_calibration": "off",
+        "calibration_method": "off",
+        "reason": "calibration_disabled",
         "master_regulators": list(master_genes),
         "gene_levels": dict(level_info["gene_to_level"]),
-        "cyclic_or_acyclic": level_info["cyclic_or_acyclic"],
-        "half_responses_filled_count": 0,
-        "half_responses_missing_count": int(grn.edges["half_response"].isna().sum()),
+        "grn_structure": level_info["cyclic_or_acyclic"],
         "warnings": list(level_info["warnings"]),
+        "converged": True,
+        "iterations": 0,
+        "max_residual": 0.0,
+        "failed_conditions": [],
+        "failed_genes": [],
+        "conditions": [],
+        "half_responses_filled_count": 0,
+        "half_responses_missing_count_before": missing,
+        "half_responses_missing_count_after": missing,
     }
 
 
@@ -951,31 +966,28 @@ def _maybe_calibrate_grn(
     grn: GRN,
     *,
     master_genes: tuple[str, ...],
-    production_profile: StateProductionProfile | None,
-    auto_calibrate_half_response: bool | str,
+    source_rates: pd.DataFrame,
+    half_response_calibration: str,
     grn_calibration: Mapping[str, object] | None,
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
 ) -> tuple[GRN, Mapping[str, object] | None]:
-    if auto_calibrate_half_response not in (False, True, "if_missing"):
-        raise ValueError("auto_calibrate_half_response must be False, True, or 'if_missing'")
-    if auto_calibrate_half_response is False:
-        return grn, grn_calibration
-    if production_profile is None:
-        raise ValueError("production_profile must be provided when auto_calibrate_half_response is enabled")
-
-    missing_half_response = bool(grn.edges["half_response"].isna().any())
-    if auto_calibrate_half_response == "if_missing" and not missing_half_response:
-        return grn, grn_calibration
+    if half_response_calibration not in HALF_RESPONSE_CALIBRATIONS:
+        raise ValueError(
+            f"half_response_calibration must be one of {sorted(HALF_RESPONSE_CALIBRATIONS)}"
+        )
+    if half_response_calibration == "off":
+        summary = _grn_calibration_summary(grn, master_genes, grn_calibration=grn_calibration)
+        return grn, summary
 
     calibrated_grn, calibration = calibrate_grn_half_response(
         grn,
-        production_profile.rates,
+        source_rates,
         explicit_master_regulators=master_genes,
+        calibration=half_response_calibration,
         target_leak_alpha=target_leak_alpha,
     )
     merged = dict(grn_calibration or {})
     merged.update(calibration)
-    merged["auto_calibrate_half_response"] = auto_calibrate_half_response
     return calibrated_grn, merged
 
 
@@ -1022,15 +1034,6 @@ def _observed_from_true(
     )
 
 
-def _merge_programs(
-    base: Mapping[str, AlphaProgram],
-    overrides: Mapping[str, AlphaProgram | float] | None,
-) -> dict[str, AlphaProgram]:
-    merged = dict(base)
-    if overrides:
-        merged.update(coerce_programs(overrides))
-    return merged
-
 def _simulate_graph_impl(
     grn: GRN,
     n_cells_per_state: int | Mapping[str, int] = 60,
@@ -1045,7 +1048,6 @@ def _simulate_graph_impl(
     graph: StateGraph | pd.DataFrame | dict[str, object] | None = None,
     production_profile: StateProductionProfile | None = None,
     master_programs: Mapping[str, AlphaProgram | float] | None = None,
-    state_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
     default_master_alpha: float = 0.5,
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     alpha_max: float | None = None,
@@ -1056,7 +1058,7 @@ def _simulate_graph_impl(
     dropout_rate: float = 0.0,
     capture_model: str | None = None,
     regulator_activity: str = "spliced",
-    auto_calibrate_half_response: bool | str = False,
+    half_response_calibration: str = "off",
     grn_calibration: Mapping[str, object] | None = None,
     return_edge_contributions: bool = False,
     allow_profile_targets_as_masters: bool = False,
@@ -1132,29 +1134,11 @@ def _simulate_graph_impl(
         _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
         resolved_graph.validate_states(production_profile.states)
         production_profile.validate_states(list(states))
-        if state_master_programs is not None:
-            raise ValueError("state_master_programs are only supported when alpha_source_mode continuous_program is active")
     elif production_profile is not None:
         raise ValueError("production_profile requires alpha_source_mode state_anchor")
 
-    grn, grn_calibration = _maybe_calibrate_grn(
-        grn,
-        master_genes=master_genes,
-        production_profile=production_profile,
-        auto_calibrate_half_response=auto_calibrate_half_response,
-        grn_calibration=grn_calibration,
-        target_leak_alpha=target_leak_alpha,
-    )
-
     if resolved_alpha_source_mode == "state_anchor":
-        steady_states = _steady_state_table_from_source_rates(
-            grn,
-            production_profile.rates.reindex(index=list(states), columns=list(master_genes), fill_value=0.0),
-            master_genes=master_genes,
-            beta=beta_series,
-            gamma=gamma_series,
-            target_leak_alpha=target_leak_alpha,
-        )
+        source_rates = production_profile.rates.reindex(index=list(states), columns=list(master_genes), fill_value=0.0)
     else:
         source_rates = _source_rates_from_program_starts(
             states=states,
@@ -1162,16 +1146,25 @@ def _simulate_graph_impl(
             total_program_time=total_program_time,
             master_genes=master_genes,
             base_programs=programs,
-            state_master_programs=state_master_programs,
         )
-        steady_states = _steady_state_table_from_source_rates(
-            grn,
-            source_rates,
-            master_genes=master_genes,
-            beta=beta_series,
-            gamma=gamma_series,
-            target_leak_alpha=target_leak_alpha,
-        )
+
+    grn, grn_calibration = _maybe_calibrate_grn(
+        grn,
+        master_genes=master_genes,
+        source_rates=source_rates,
+        half_response_calibration=half_response_calibration,
+        grn_calibration=grn_calibration,
+        target_leak_alpha=target_leak_alpha,
+    )
+
+    steady_states = _steady_state_table_from_source_rates(
+        grn,
+        source_rates,
+        master_genes=master_genes,
+        beta=beta_series,
+        gamma=gamma_series,
+        target_leak_alpha=target_leak_alpha,
+    )
 
     state_segments: dict[str, dict[str, np.ndarray]] = {}
     state_initialization: dict[str, dict[str, object]] = {}
@@ -1179,7 +1172,7 @@ def _simulate_graph_impl(
         parent_state = resolved_graph.parent_of(state)
         is_root = parent_state is None
         segment_time = float(root_time) if is_root else float(state_durations[state])
-        merged_programs = _merge_programs(programs, None if state_master_programs is None else state_master_programs.get(state))
+        merged_programs = programs
 
         if resolved_alpha_source_mode == "state_anchor":
             if is_root:
@@ -1363,7 +1356,6 @@ def _simulate_graph_impl(
         "allow_profile_targets_as_masters": allow_profile_targets_as_masters,
         "alpha_source_mode": resolved_alpha_source_mode,
         "master_programs": _serialize_master_programs(programs),
-        "state_master_programs_enabled": state_master_programs is not None,
         "production_profile": production_profile is not None,
         "production_profile_states": list(production_profile.states) if production_profile is not None else None,
         "production_profile_master_genes": list(production_profile.genes) if production_profile is not None else None,
@@ -1373,7 +1365,7 @@ def _simulate_graph_impl(
         "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
         "transition_midpoint": transition_midpoint if resolved_alpha_source_mode == "state_anchor" else None,
         "transition_steepness": transition_steepness if resolved_alpha_source_mode == "state_anchor" else None,
-        "auto_calibrate_half_response": auto_calibrate_half_response,
+        "half_response_calibration": half_response_calibration,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
         "capture_model": resolved_capture_model,
@@ -1460,12 +1452,12 @@ def simulate(
         sampling_policy=sampling_policy,
         transition_schedule=kwargs.get("transition_schedule"),
         regulator_activity=kwargs.get("regulator_activity"),
-        auto_calibrate_half_response=kwargs.get("auto_calibrate_half_response"),
+        half_response_calibration=kwargs.get("half_response_calibration"),
     )
     patched_kwargs = dict(kwargs)
     patched_kwargs["alpha_source_mode"] = resolved_mode["alpha_source_mode"]
     patched_kwargs["regulator_activity"] = resolved_mode["regulator_activity"]
-    patched_kwargs["auto_calibrate_half_response"] = resolved_mode["auto_calibrate_half_response"]
+    patched_kwargs["half_response_calibration"] = resolved_mode["half_response_calibration"]
     patched_kwargs["transition_schedule"] = resolved_mode["transition_schedule"]
     return _simulate_graph_impl(
         grn,

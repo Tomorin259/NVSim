@@ -31,6 +31,7 @@ OPTIONAL_COLUMNS = ("K", "weight", "hill_coefficient", "half_response", "thresho
 RETURN_COLUMNS = ("regulator", "target", "sign", "K", "half_response", "hill_coefficient")
 VALID_SIGNS = {"activation", "repression"}
 LEGACY_GRN_COLUMN_ALIASES = {"weight": "K", "threshold": "half_response"}
+HALF_RESPONSE_CALIBRATIONS = {"off", "auto", "topology_propagation", "cyclic"}
 _SIGN_ALIASES = {
     "activation": "activation",
     "activating": "activation",
@@ -382,16 +383,207 @@ def estimate_state_mean_expression(
     return means, levels
 
 
+
+
+def estimate_state_mean_expression_cyclic(
+    grn: GRN,
+    state_production: pd.DataFrame,
+    *,
+    explicit_master_regulators: Iterable[str] | None = None,
+    target_leak_alpha: float | pd.Series | dict[str, float] = 0.0,
+    fallback_half_response: float = 1.0,
+    max_iter: int = 500,
+    tol: float = 1e-6,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Estimate state-wise activity via fixed-point iteration for cyclic GRNs."""
+
+    state_production = state_production.copy()
+    state_production.index = state_production.index.astype(str)
+    state_production.columns = state_production.columns.astype(str)
+    state_production = state_production.astype(float)
+
+    levels = build_graph_levels(grn, explicit_master_regulators=explicit_master_regulators)
+    masters = tuple(levels["master_regulators"])
+    state_production = state_production.reindex(columns=list(masters), fill_value=0.0)
+    means = pd.DataFrame(fallback_half_response, index=state_production.index, columns=list(grn.genes), dtype=float)
+    means.loc[:, masters] = state_production.loc[:, masters]
+
+    if np.isscalar(target_leak_alpha):
+        leak = pd.Series(float(target_leak_alpha), index=pd.Index(grn.genes, name="gene"), dtype=float)
+    else:
+        leak = pd.Series(target_leak_alpha, dtype=float).reindex(grn.genes, fill_value=0.0)
+    leak = leak.clip(lower=0.0)
+
+    master_set = set(masters)
+    target_to_edges: dict[str, list[object]] = {
+        str(gene): list(grn.edges.loc[grn.edges["target"].astype(str) == str(gene)].itertuples(index=False))
+        for gene in grn.genes
+    }
+    status: dict[str, dict[str, object]] = {}
+    failed_conditions: list[str] = []
+    max_residual = 0.0
+    max_iterations = 0
+
+    for state in state_production.index.astype(str):
+        current = means.loc[state].astype(float).copy()
+        current.loc[list(masters)] = state_production.loc[state, list(masters)].to_numpy(dtype=float)
+        converged = False
+        residual = float("inf")
+        iterations = 0
+        for iterations in range(1, max_iter + 1):
+            updated = current.copy()
+            updated.loc[list(masters)] = state_production.loc[state, list(masters)].to_numpy(dtype=float)
+            for gene in grn.genes:
+                if gene in master_set:
+                    continue
+                gene_value = float(leak.get(gene, 0.0))
+                for edge in target_to_edges[str(gene)]:
+                    reg_value = max(float(current.get(str(edge.regulator), 0.0)), 0.0)
+                    half_response = edge.half_response if not pd.isna(edge.half_response) else fallback_half_response
+                    numerator = np.power(reg_value, edge.hill_coefficient)
+                    denominator = np.power(half_response, edge.hill_coefficient) + numerator
+                    act = float(numerator / denominator) if denominator > 0 else 0.0
+                    response = 1.0 - act if edge.sign == "repression" else act
+                    gene_value += float(edge.K) * response
+                updated.loc[str(gene)] = max(gene_value, 0.0)
+            residual = float(np.max(np.abs(updated.to_numpy(dtype=float) - current.to_numpy(dtype=float))))
+            current = updated
+            if residual <= tol:
+                converged = True
+                break
+        means.loc[state] = current.reindex(grn.genes).to_numpy(dtype=float)
+        status[state] = {
+            "converged": bool(converged),
+            "iterations": int(iterations),
+            "max_residual": float(residual),
+        }
+        if not converged:
+            failed_conditions.append(str(state))
+        max_residual = max(max_residual, float(residual))
+        max_iterations = max(max_iterations, int(iterations))
+
+    levels = dict(levels)
+    levels["converged"] = len(failed_conditions) == 0
+    levels["iterations"] = max_iterations
+    levels["max_residual"] = max_residual
+    levels["failed_conditions"] = tuple(failed_conditions)
+    levels["per_condition_solver_status"] = status
+    return means, levels
+
+
+def _coerce_half_response_calibration(calibration: str) -> str:
+    value = str(calibration).strip().lower()
+    if value not in HALF_RESPONSE_CALIBRATIONS - {"off"}:
+        raise ValueError(
+            "half_response calibration must be one of ['auto', 'topology_propagation', 'cyclic']"
+        )
+    return value
+
+
+def _half_response_from_values(values: np.ndarray, *, method: str, fallback_half_response: float) -> float:
+    regulator_values = np.asarray(values, dtype=float)
+    nonzero = regulator_values[regulator_values > 0]
+    if method == "median_nonzero":
+        value = float(np.nanmedian(nonzero)) if nonzero.size else float(fallback_half_response)
+    else:
+        value = float(np.nanmean(regulator_values)) if regulator_values.size else float(fallback_half_response)
+    if not np.isfinite(value) or value <= 0:
+        value = float(fallback_half_response)
+    return value
+
+
+def _resolve_calibration_summary(
+    grn_obj: GRN,
+    state_production: pd.DataFrame,
+    *,
+    explicit_master_regulators: Iterable[str] | None,
+    calibration: str,
+    method: str,
+    fallback_half_response: float,
+    target_leak_alpha: float | pd.Series | dict[str, float],
+    max_iter: int,
+    tol: float,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    level_info = build_graph_levels(grn_obj, explicit_master_regulators=explicit_master_regulators)
+    structure = str(level_info["cyclic_or_acyclic"])
+    requested = _coerce_half_response_calibration(calibration)
+    edges = grn_obj.to_dataframe()
+    if requested == "auto":
+        if not edges["half_response"].isna().any():
+            return pd.DataFrame(), {
+                "requested_calibration": "auto",
+                "actual_calibration": "provided",
+                "calibration_method": "provided",
+                "reason": "all_half_response_present",
+                "grn_structure": structure,
+                "master_regulators": list(level_info["master_regulators"]),
+                "gene_levels": dict(level_info["gene_to_level"]),
+                "warnings": list(level_info["warnings"]),
+                "converged": True,
+                "iterations": 0,
+                "max_residual": 0.0,
+                "failed_conditions": [],
+                "failed_genes": [],
+                "conditions": [str(state) for state in state_production.index.astype(str)],
+                "half_responses_filled_count": 0,
+                "half_responses_missing_count_before": int(edges["half_response"].isna().sum()),
+                "half_responses_missing_count_after": int(edges["half_response"].isna().sum()),
+            }
+        actual = "cyclic" if structure == "cyclic" else "topology_propagation"
+        reason = "auto_selected_from_grn_structure"
+    else:
+        actual = requested
+        reason = "explicit_request"
+
+    if actual == "topology_propagation":
+        if structure == "cyclic":
+            raise ValueError("half_response_calibration=\"topology_propagation\" requires an acyclic GRN")
+        state_means, meta = estimate_state_mean_expression(
+            grn_obj,
+            state_production,
+            explicit_master_regulators=explicit_master_regulators,
+            target_leak_alpha=target_leak_alpha,
+            fallback_half_response=fallback_half_response,
+        )
+        meta = dict(meta)
+        meta.setdefault("converged", True)
+        meta.setdefault("iterations", 1)
+        meta.setdefault("max_residual", 0.0)
+        meta.setdefault("failed_conditions", tuple())
+    else:
+        state_means, meta = estimate_state_mean_expression_cyclic(
+            grn_obj,
+            state_production,
+            explicit_master_regulators=explicit_master_regulators,
+            target_leak_alpha=target_leak_alpha,
+            fallback_half_response=fallback_half_response,
+            max_iter=max_iter,
+            tol=tol,
+        )
+        meta = dict(meta)
+
+    meta["requested_calibration"] = requested
+    meta["actual_calibration"] = actual
+    meta["calibration_method"] = actual
+    meta["reason"] = reason
+    meta["grn_structure"] = structure
+    meta["conditions"] = [str(state) for state in state_production.index.astype(str)]
+    meta["failed_genes"] = []
+    return state_means, meta
+
 def calibrate_grn_half_response(
     grn: GRN | pd.DataFrame,
     state_production: pd.DataFrame,
     *,
     explicit_master_regulators: Iterable[str] | None = None,
+    calibration: str = "auto",
     method: str = "mean",
     fallback_half_response: float = 1.0,
     target_leak_alpha: float | pd.Series | dict[str, float] = 0.0,
+    max_iter: int = 500,
+    tol: float = 1e-6,
 ) -> tuple[GRN | pd.DataFrame, dict[str, object]]:
-    """Calibrate half-response values using state/bin-wise expression proxies."""
+    """Calibrate half-response values using state-wise regulator activity proxies."""
 
     if isinstance(grn, GRN):
         grn_obj = grn
@@ -400,41 +592,50 @@ def calibrate_grn_half_response(
         edges = validate_grn(grn)
         grn_obj = GRN.from_dataframe(edges)
 
-    state_means, level_info = estimate_state_mean_expression(
+    state_production = state_production.copy()
+    state_production.index = state_production.index.astype(str)
+    state_production.columns = state_production.columns.astype(str)
+    state_production = state_production.astype(float)
+
+    state_means, metadata = _resolve_calibration_summary(
         grn_obj,
         state_production,
         explicit_master_regulators=explicit_master_regulators,
-        target_leak_alpha=target_leak_alpha,
+        calibration=calibration,
+        method=method,
         fallback_half_response=fallback_half_response,
+        target_leak_alpha=target_leak_alpha,
+        max_iter=max_iter,
+        tol=tol,
     )
-    calibrated = edges.copy()
-    filled = 0
-    calibration_method = "fallback_for_cyclic_grn" if level_info["cyclic_or_acyclic"] == "cyclic" else "levelwise_state_mean"
-    for idx, edge in calibrated.iterrows():
-        if pd.notna(edge["half_response"]):
-            continue
-        if level_info["cyclic_or_acyclic"] == "cyclic":
-            value = float(fallback_half_response)
-        else:
-            regulator_values = state_means[str(edge["regulator"])].to_numpy(dtype=float)
-            nonzero = regulator_values[regulator_values > 0]
-            if method == "median_nonzero":
-                value = float(np.nanmedian(nonzero)) if nonzero.size else float(fallback_half_response)
-            else:
-                value = float(np.nanmean(regulator_values)) if regulator_values.size else float(fallback_half_response)
-        if not np.isfinite(value) or value <= 0:
-            value = float(fallback_half_response)
-        calibrated.loc[idx, "half_response"] = value
-        filled += 1
 
-    metadata = {
-        "calibration_method": calibration_method if len(calibrated) else "none",
-        "master_regulators": level_info["master_regulators"],
-        "gene_levels": level_info["gene_to_level"],
-        "cyclic_or_acyclic": level_info["cyclic_or_acyclic"],
-        "half_responses_filled_count": int(filled),
-        "warnings": level_info["warnings"],
-    }
+    calibrated = edges.copy()
+    missing_before = int(calibrated["half_response"].isna().sum())
+    filled = 0
+
+    if metadata["actual_calibration"] == "provided":
+        if isinstance(grn, GRN):
+            return GRN.from_dataframe(calibrated, genes=grn.genes, master_regulators=grn.master_regulators), metadata
+        return calibrated, metadata
+
+    overwrite_all = calibration in {"topology_propagation", "cyclic"}
+    for idx, edge in calibrated.iterrows():
+        if not overwrite_all and pd.notna(edge["half_response"]):
+            continue
+        regulator_values = state_means[str(edge["regulator"])].to_numpy(dtype=float)
+        value = _half_response_from_values(
+            regulator_values,
+            method=method,
+            fallback_half_response=fallback_half_response,
+        )
+        if pd.isna(calibrated.loc[idx, "half_response"]):
+            filled += 1
+        calibrated.loc[idx, "half_response"] = value
+
+    metadata["half_responses_filled_count"] = int(filled)
+    metadata["half_responses_missing_count_before"] = missing_before
+    metadata["half_responses_missing_count_after"] = int(calibrated["half_response"].isna().sum())
+
     if isinstance(grn, GRN):
         return GRN.from_dataframe(calibrated, genes=grn.genes, master_regulators=grn.master_regulators), metadata
     return calibrated, metadata

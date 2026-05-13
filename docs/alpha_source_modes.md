@@ -34,8 +34,9 @@ where the external master-regulator forcing should be explicit and smooth.
 Example:
 
 ```python
-simulate_linear(
+simulate(
     grn,
+    simulator="linear",
     alpha_source_mode="continuous_program",
     master_programs={"g0": linear_increase(0.2, 1.2), "g1": 0.8},
 )
@@ -85,8 +86,9 @@ default.
 Linear example:
 
 ```python
-simulate_linear(
+simulate(
     grn,
+    simulator="linear",
     alpha_source_mode="state_anchor",
     production_profile=profile,
     parent_state="progenitor",
@@ -98,8 +100,9 @@ simulate_linear(
 Bifurcation example:
 
 ```python
-simulate_bifurcation(
+simulate(
     grn,
+    simulator="bifurcation",
     alpha_source_mode="state_anchor",
     production_profile=profile,
     trunk_state="progenitor",

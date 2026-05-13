@@ -13,15 +13,16 @@ from run_mvp_linear import build_example_grn
 
 from nvsim.output import to_anndata
 from nvsim.production import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
-from nvsim.simulate import simulate_bifurcation
+from nvsim.simulate import simulate
 
 
 def build_bifurcation_result(capture_rate: float = 0.5, dropout_rate: float = 0.02, poisson_observed: bool = True):
     """Generate the toy bifurcation dataset used by examples and tests."""
 
     grn = build_example_grn()
-    return simulate_bifurcation(
+    return simulate(
         grn,
+        simulator="bifurcation",
         n_trunk_cells=50,
         n_branch_cells={"branch_0": 60, "branch_1": 60},
         trunk_time=2.0,

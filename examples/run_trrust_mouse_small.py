@@ -25,7 +25,7 @@ from nvsim.plotting import (
     select_genes,
 )
 from nvsim.production import StateProductionProfile
-from nvsim.simulate import simulate_bifurcation
+from nvsim.simulate import simulate
 
 DATA_DIR = ROOT / "data" / "external" / "trrust_mouse"
 OUTPUT_DIR = ROOT / "examples" / "outputs" / "trrust_mouse_small"
@@ -58,8 +58,9 @@ def load_trrust_small_inputs(data_dir: Path = DATA_DIR) -> tuple[GRN, list[str],
 
 def build_trrust_mouse_bifurcation_result(seed: int = 1) -> dict:
     grn, masters, production = load_trrust_small_inputs()
-    return simulate_bifurcation(
+    return simulate(
         grn,
+        simulator="bifurcation",
         n_trunk_cells=70,
         n_branch_cells={"branch_0": 90, "branch_1": 90},
         trunk_time=1.5,

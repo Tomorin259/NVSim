@@ -27,7 +27,14 @@ from .production import (
 )
 
 # Simulation and observed-layer generation.
-from .simulate import create_kinetic_vectors, initialize_state, simulate_bifurcation, simulate_linear, validate_positive_vector
+from .simulate import (
+    create_kinetic_vectors,
+    initialize_state,
+    simulate,
+    simulate_bifurcation,
+    simulate_linear,
+    validate_positive_vector,
+)
 from .noise import generate_observed_counts
 from .output import make_result_dict, to_anndata
 
@@ -66,6 +73,7 @@ __all__ = [
     "create_kinetic_vectors",
     "initialize_state",
     "validate_positive_vector",
+    "simulate",
     "AlphaProgram",
     "StateProductionProfile",
     "constant",
@@ -74,6 +82,7 @@ __all__ = [
     "sigmoid_increase",
     "sigmoid_decrease",
     "transition_weight",
+    "simulate",
     "simulate_linear",
     "simulate_bifurcation",
     "generate_observed_counts",

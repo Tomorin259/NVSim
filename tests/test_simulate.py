@@ -4,7 +4,7 @@ import pytest
 
 from nvsim.grn import GRN
 from nvsim.production import StateProductionProfile, linear_increase
-from nvsim.simulate import simulate_linear
+from nvsim.simulate import simulate, simulate_linear
 
 
 def _small_grn():
@@ -50,6 +50,24 @@ def test_true_velocity_matches_formula_and_states_are_nonnegative():
     assert np.all(layers["true_alpha"] >= 0.0)
     assert np.all(layers["true_unspliced"] >= 0.0)
     assert np.all(layers["true_spliced"] >= 0.0)
+
+
+def test_unified_simulate_dispatch_matches_linear_wrapper():
+    grn = _small_grn()
+    kwargs = {
+        "n_cells": 12,
+        "time_end": 1.0,
+        "dt": 0.05,
+        "seed": 31,
+        "poisson_observed": False,
+    }
+    dispatched = simulate(grn, simulator="linear", **kwargs)
+    wrapped = simulate_linear(grn, **kwargs)
+
+    assert np.allclose(dispatched["layers"]["true_unspliced"], wrapped["layers"]["true_unspliced"])
+    assert np.allclose(dispatched["layers"]["true_spliced"], wrapped["layers"]["true_spliced"])
+    assert np.allclose(dispatched["layers"]["true_alpha"], wrapped["layers"]["true_alpha"])
+    assert dispatched["uns"]["simulation_config"]["model"] == wrapped["uns"]["simulation_config"]["model"]
 
 
 def test_output_dimensions_are_correct():

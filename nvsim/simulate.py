@@ -866,7 +866,7 @@ def _branch_programs_differ(
     return False
 
 
-def simulate_linear(
+def _simulate_linear_impl(
     grn: GRN,
     n_cells: int = 100,
     time_end: float = 1.0,
@@ -1123,7 +1123,7 @@ def simulate_linear(
     )
 
 
-def simulate_bifurcation(
+def _simulate_bifurcation_impl(
     grn: GRN,
     n_trunk_cells: int = 50,
     n_branch_cells: int | Mapping[str, int] = 60,
@@ -1512,6 +1512,189 @@ def simulate_bifurcation(
         "branch_1_initial_s": branch_segments["branch_1"]["s"][0].copy(),
     }
     return result
+
+
+def simulate(
+    grn: GRN,
+    *,
+    simulator: str = "linear",
+    **kwargs: object,
+) -> dict:
+    """Unified public simulation entry point.
+
+    ``simulator`` selects which trajectory family to run. Remaining keyword
+    arguments are forwarded to the corresponding implementation:
+
+    - ``linear`` -> ``simulate_linear()`` semantics
+    - ``bifurcation`` / ``branch`` -> ``simulate_bifurcation()`` semantics
+    """
+
+    resolved = str(simulator).strip().lower()
+    if resolved == "linear":
+        return _simulate_linear_impl(grn, **kwargs)
+    if resolved in {"bifurcation", "branch"}:
+        return _simulate_bifurcation_impl(grn, **kwargs)
+    raise ValueError("simulator must be 'linear', 'bifurcation', or 'branch'")
+
+
+def simulate_linear(
+    grn: GRN,
+    n_cells: int = 100,
+    time_end: float = 1.0,
+    dt: float = 0.01,
+    beta: object | None = None,
+    gamma: object | None = None,
+    u0: object | None = None,
+    s0: object | None = None,
+    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
+    production_profile: StateProductionProfile | None = None,
+    production_state: str | None = None,
+    master_programs: Mapping[str, AlphaProgram | float] | None = None,
+    default_master_alpha: float = 0.5,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
+    alpha_max: float | None = None,
+    seed: int = 0,
+    noise_seed: int | None = None,
+    capture_rate: float | None = None,
+    poisson_observed: bool = True,
+    dropout_rate: float = 0.0,
+    capture_model: str | None = None,
+    regulator_activity: str = "spliced",
+    auto_calibrate_half_response: bool | str = False,
+    grn_calibration: Mapping[str, object] | None = None,
+    return_edge_contributions: bool = False,
+    allow_profile_targets_as_masters: bool = False,
+    allow_snapshot_replacement: bool = False,
+    alpha_source_mode: str | None = None,
+    parent_state: str | None = None,
+    child_state: str | None = None,
+    transition_schedule: str = "sigmoid",
+    transition_midpoint: float = 0.5,
+    transition_steepness: float = 10.0,
+    profile_gene_policy: str = "exact",
+) -> dict:
+    """Backward-compatible linear wrapper around the unified simulate() entry."""
+
+    return simulate(
+        grn,
+        simulator="linear",
+        n_cells=n_cells,
+        time_end=time_end,
+        dt=dt,
+        beta=beta,
+        gamma=gamma,
+        u0=u0,
+        s0=s0,
+        master_regulators=master_regulators,
+        production_profile=production_profile,
+        production_state=production_state,
+        master_programs=master_programs,
+        default_master_alpha=default_master_alpha,
+        target_leak_alpha=target_leak_alpha,
+        alpha_max=alpha_max,
+        seed=seed,
+        noise_seed=noise_seed,
+        capture_rate=capture_rate,
+        poisson_observed=poisson_observed,
+        dropout_rate=dropout_rate,
+        capture_model=capture_model,
+        regulator_activity=regulator_activity,
+        auto_calibrate_half_response=auto_calibrate_half_response,
+        grn_calibration=grn_calibration,
+        return_edge_contributions=return_edge_contributions,
+        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
+        allow_snapshot_replacement=allow_snapshot_replacement,
+        alpha_source_mode=alpha_source_mode,
+        parent_state=parent_state,
+        child_state=child_state,
+        transition_schedule=transition_schedule,
+        transition_midpoint=transition_midpoint,
+        transition_steepness=transition_steepness,
+        profile_gene_policy=profile_gene_policy,
+    )
+
+
+def simulate_bifurcation(
+    grn: GRN,
+    n_trunk_cells: int = 50,
+    n_branch_cells: int | Mapping[str, int] = 60,
+    trunk_time: float = 2.0,
+    branch_time: float = 2.0,
+    dt: float = 0.01,
+    beta: object | None = None,
+    gamma: object | None = None,
+    u0: object | None = None,
+    s0: object | None = None,
+    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
+    production_profile: StateProductionProfile | None = None,
+    master_programs: Mapping[str, AlphaProgram | float] | None = None,
+    branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
+    default_master_alpha: float = 0.5,
+    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
+    alpha_max: float | None = None,
+    seed: int = 0,
+    noise_seed: int | None = None,
+    capture_rate: float | None = None,
+    poisson_observed: bool = True,
+    dropout_rate: float = 0.0,
+    capture_model: str | None = None,
+    regulator_activity: str = "spliced",
+    auto_calibrate_half_response: bool | str = False,
+    grn_calibration: Mapping[str, object] | None = None,
+    return_edge_contributions: bool = False,
+    allow_profile_targets_as_masters: bool = False,
+    include_branch_initial_state: bool = False,
+    allow_snapshot_replacement: bool = False,
+    alpha_source_mode: str | None = None,
+    trunk_state: str | None = None,
+    branch_child_states: Mapping[str, str] | tuple[str, str] | list[str] | None = None,
+    transition_schedule: str = "sigmoid",
+    transition_midpoint: float = 0.5,
+    transition_steepness: float = 10.0,
+    profile_gene_policy: str = "exact",
+) -> dict:
+    """Backward-compatible bifurcation wrapper around the unified simulate() entry."""
+
+    return simulate(
+        grn,
+        simulator="bifurcation",
+        n_trunk_cells=n_trunk_cells,
+        n_branch_cells=n_branch_cells,
+        trunk_time=trunk_time,
+        branch_time=branch_time,
+        dt=dt,
+        beta=beta,
+        gamma=gamma,
+        u0=u0,
+        s0=s0,
+        master_regulators=master_regulators,
+        production_profile=production_profile,
+        master_programs=master_programs,
+        branch_master_programs=branch_master_programs,
+        default_master_alpha=default_master_alpha,
+        target_leak_alpha=target_leak_alpha,
+        alpha_max=alpha_max,
+        seed=seed,
+        noise_seed=noise_seed,
+        capture_rate=capture_rate,
+        poisson_observed=poisson_observed,
+        dropout_rate=dropout_rate,
+        capture_model=capture_model,
+        regulator_activity=regulator_activity,
+        auto_calibrate_half_response=auto_calibrate_half_response,
+        grn_calibration=grn_calibration,
+        return_edge_contributions=return_edge_contributions,
+        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
+        include_branch_initial_state=include_branch_initial_state,
+        allow_snapshot_replacement=allow_snapshot_replacement,
+        alpha_source_mode=alpha_source_mode,
+        trunk_state=trunk_state,
+        branch_child_states=branch_child_states,
+        transition_schedule=transition_schedule,
+        transition_midpoint=transition_midpoint,
+        transition_steepness=transition_steepness,
+        profile_gene_policy=profile_gene_policy,
+    )
 
 
 def simulate_bifurcation_legacy(

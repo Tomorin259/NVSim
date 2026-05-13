@@ -14,7 +14,7 @@ import pandas as pd
 from nvsim.grn import GRN
 from nvsim.output import to_anndata
 from nvsim.production import linear_increase, sigmoid_decrease
-from nvsim.simulate import simulate_linear
+from nvsim.simulate import simulate
 
 
 def build_example_grn() -> GRN:
@@ -37,8 +37,9 @@ def build_example_grn() -> GRN:
 
 def main() -> None:
     grn = build_example_grn()
-    result = simulate_linear(
+    result = simulate(
         grn,
+        simulator="linear",
         n_cells=100,
         time_end=4.0,
         dt=0.02,

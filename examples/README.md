@@ -10,7 +10,8 @@ ignored by `.gitignore` because they can be regenerated.
 
 - `tutorial.py`: the canonical end-to-end tutorial for the current public API.
   It shows the recommended imports, GRN schema, noise settings, and both
-  `simulate_linear()` and `simulate_bifurcation()` calls.
+  `simulate(..., simulator="linear")` and
+  `simulate(..., simulator="bifurcation")` calls.
 
 If the public simulation interface changes, update `tutorial.py` in the same
 change set.

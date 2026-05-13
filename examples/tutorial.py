@@ -31,7 +31,7 @@ if str(ROOT) not in sys.path:
 from nvsim.grn import GRN
 from nvsim.output import to_anndata
 from nvsim.production import StateProductionProfile, linear_increase, sigmoid_decrease
-from nvsim.simulate import simulate_bifurcation, simulate_linear
+from nvsim.simulate import simulate
 
 
 def build_tutorial_grn() -> GRN:
@@ -126,7 +126,7 @@ def build_tutorial_profile() -> StateProductionProfile:
 def linear_parameters() -> dict[str, object]:
     """线性轨迹 tutorial 的推荐参数块。
 
-    simulate_linear() 用于生成一条线性轨迹：
+    simulate(..., simulator="linear") 用于生成一条线性轨迹：
         root / early cells -> later cells
 
     这里使用 alpha_source_mode="continuous_program"，
@@ -235,7 +235,7 @@ def linear_parameters() -> dict[str, object]:
 def bifurcation_parameters() -> dict[str, object]:
     """state-anchor bifurcation tutorial 的推荐参数块。
 
-    simulate_bifurcation() 用于生成 trunk-to-two-branch 轨迹：
+    simulate(..., simulator="bifurcation") 用于生成 trunk-to-two-branch 轨迹：
         trunk -> branch_0
               -> branch_1
 
@@ -355,13 +355,13 @@ def run_linear_tutorial() -> dict:
     这样即使没有安装 anndata，也可以运行模拟和检查 layers/obs/var/uns。
     """
 
-    return simulate_linear(build_tutorial_grn(), **linear_parameters())
+    return simulate(build_tutorial_grn(), simulator="linear", **linear_parameters())
 
 
 def run_bifurcation_tutorial() -> dict:
     """运行 trunk-to-two-branch 分支轨迹模拟。"""
 
-    return simulate_bifurcation(build_tutorial_grn(), **bifurcation_parameters())
+    return simulate(build_tutorial_grn(), simulator="bifurcation", **bifurcation_parameters())
 
 
 def _write_if_possible(result: dict, path: Path) -> None:

@@ -1351,7 +1351,7 @@ def _simulate_graph_impl(
         "n_cells_per_state": state_cell_counts,
         "state_order": list(states),
         "root_states": list(root_states),
-        "graph_edges": resolved_graph.edges.to_dict(orient="records"),
+        "graph_edges": resolved_graph.edges.copy(),
         "seed": seed,
         "integrator": "rk4",
         "alpha_max": alpha_max,

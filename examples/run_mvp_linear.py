@@ -1,4 +1,4 @@
-"""Run a small NVSim linear ODE MVP example."""
+"""Run a small NVSim path-graph ODE MVP example."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 
 from nvsim.grn import GRN
+from nvsim.modes import path_graph
 from nvsim.output import to_anndata
 from nvsim.production import linear_increase, sigmoid_decrease
 from nvsim.simulate import simulate
@@ -39,10 +40,12 @@ def main() -> None:
     grn = build_example_grn()
     result = simulate(
         grn,
-        simulator="linear",
-        n_cells=100,
-        time_end=4.0,
+        graph=path_graph(["early", "late"]),
+        n_cells_per_state={"early": 50, "late": 50},
+        root_time=2.0,
+        state_time={"early": 2.0, "late": 2.0},
         dt=0.02,
+        alpha_source_mode="continuous_program",
         master_programs={
             "g0": linear_increase(0.2, 1.2),
             "g1": 0.8,

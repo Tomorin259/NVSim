@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from nvsim.grn import GRN
+from nvsim.modes import branching_graph, path_graph
 from nvsim.output import to_anndata
 from nvsim.plotting import (
     embed,
@@ -16,8 +17,8 @@ from nvsim.plotting import (
     select_genes,
 )
 from nvsim.velocity_plotting import prepare_velocity_adata
-from nvsim.production import linear_decrease, linear_increase
-from nvsim.simulate import simulate_bifurcation, simulate_linear
+from nvsim.production import StateProductionProfile, linear_decrease, linear_increase
+from nvsim.simulate import simulate
 
 
 def _linear_result():
@@ -33,10 +34,21 @@ def _linear_result():
         ),
         genes=["g0", "g1", "g2"],
     )
-    return simulate_linear(grn, n_cells=12, time_end=1.0, dt=0.05, seed=21, poisson_observed=False)
+    return simulate(
+        grn,
+        graph=path_graph(["early", "late"]),
+        alpha_source_mode="continuous_program",
+        master_programs={"g0": linear_increase(0.2, 0.7)},
+        n_cells_per_state={"early": 6, "late": 6},
+        root_time=1.0,
+        state_time={"early": 1.0, "late": 1.0},
+        dt=0.05,
+        seed=21,
+        poisson_observed=False,
+    )
 
 
-def _bifurcation_result():
+def _branching_result():
     grn = GRN.from_dataframe(
         pd.DataFrame(
             {
@@ -49,18 +61,24 @@ def _bifurcation_result():
         ),
         genes=["g0", "g1", "g2", "g3"],
     )
-    return simulate_bifurcation(
+    profile = StateProductionProfile(
+        pd.DataFrame(
+            {
+                "g0": [0.5, 1.3, 0.2],
+                "g1": [0.4, 0.1, 1.1],
+            },
+            index=["root", "branch_0", "branch_1"],
+        )
+    )
+    return simulate(
         grn,
-        n_trunk_cells=8,
-        n_branch_cells={"branch_0": 8, "branch_1": 8},
-        trunk_time=1.0,
-        branch_time=1.0,
+        graph=branching_graph("root", ["branch_0", "branch_1"]),
+        production_profile=profile,
+        alpha_source_mode="state_anchor",
+        n_cells_per_state={"root": 8, "branch_0": 8, "branch_1": 8},
+        root_time=1.0,
+        state_time={"root": 1.0, "branch_0": 1.0, "branch_1": 1.0},
         dt=0.05,
-        master_programs={"g0": linear_increase(0.2, 0.7), "g1": linear_increase(0.3, 0.6)},
-        branch_master_programs={
-            "branch_0": {"g0": linear_increase(0.7, 1.4), "g1": linear_decrease(0.6, 0.1)},
-            "branch_1": {"g0": linear_decrease(0.7, 0.1), "g1": linear_increase(0.6, 1.2)},
-        },
         seed=9,
         poisson_observed=False,
     )
@@ -149,7 +167,7 @@ def test_phase_gallery_and_gene_dynamics_save_files(tmp_path: Path):
 
 
 def test_select_genes_returns_valid_representatives():
-    adata = prepare_adata(_bifurcation_result(), expression_layer="true")
+    adata = prepare_adata(_branching_result(), expression_layer="true")
     selected = select_genes(adata, representative_genes="auto")
 
     assert 3 <= len(selected) <= 4

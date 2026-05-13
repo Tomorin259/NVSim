@@ -1,4 +1,4 @@
-"""Run a small NVSim bifurcation ODE MVP example."""
+"""Run a small NVSim branching-graph ODE MVP example."""
 
 from __future__ import annotations
 
@@ -9,40 +9,37 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import pandas as pd
+
 from run_mvp_linear import build_example_grn
 
+from nvsim.modes import branching_graph
 from nvsim.output import to_anndata
-from nvsim.production import linear_decrease, linear_increase, sigmoid_decrease, sigmoid_increase
+from nvsim.production import StateProductionProfile
 from nvsim.simulate import simulate
 
 
 def build_bifurcation_result(capture_rate: float = 0.5, dropout_rate: float = 0.02, poisson_observed: bool = True):
-    """Generate the toy bifurcation dataset used by examples and tests."""
-
     grn = build_example_grn()
+    profile = StateProductionProfile(
+        pd.DataFrame(
+            {
+                "g0": [0.2, 1.4, 0.2],
+                "g1": [0.75, 0.75, 0.75],
+                "g2": [1.0, 1.1, 0.05],
+            },
+            index=["root", "branch_0", "branch_1"],
+        )
+    )
     return simulate(
         grn,
-        simulator="bifurcation",
-        n_trunk_cells=50,
-        n_branch_cells={"branch_0": 60, "branch_1": 60},
-        trunk_time=2.0,
-        branch_time=2.5,
+        graph=branching_graph("root", ["branch_0", "branch_1"]),
+        production_profile=profile,
+        alpha_source_mode="state_anchor",
+        n_cells_per_state={"root": 50, "branch_0": 60, "branch_1": 60},
+        root_time=2.0,
+        state_time={"root": 2.0, "branch_0": 2.5, "branch_1": 2.5},
         dt=0.02,
-        master_programs={
-            "g0": linear_increase(0.2, 0.8),
-            "g1": 0.75,
-            "g2": sigmoid_decrease(1.0, 0.35),
-        },
-        branch_master_programs={
-            "branch_0": {
-                "g0": linear_increase(0.8, 1.4),
-                "g2": sigmoid_increase(0.35, 1.1, midpoint=0.65),
-            },
-            "branch_1": {
-                "g0": linear_decrease(0.8, 0.2),
-                "g2": sigmoid_decrease(0.35, 0.05, midpoint=0.65),
-            },
-        },
         seed=123,
         capture_rate=capture_rate,
         poisson_observed=poisson_observed,
@@ -60,7 +57,7 @@ def main() -> None:
         print({
             "n_cells": layers["true_spliced"].shape[0],
             "n_genes": layers["true_spliced"].shape[1],
-            "branches": sorted(result["obs"]["branch"].unique()),
+            "states": sorted(result["obs"]["state"].unique()),
             "obs_columns": list(result["obs"].columns),
         })
     else:

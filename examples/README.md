@@ -9,9 +9,9 @@ ignored by `.gitignore` because they can be regenerated.
 ## Start Here
 
 - `tutorial.py`: the canonical end-to-end tutorial for the current public API.
-  It shows the recommended imports, GRN schema, noise settings, and both
-  `simulate(..., simulator="linear")` and
-  `simulate(..., simulator="bifurcation")` calls.
+  It shows the recommended imports, GRN schema, noise settings, and unified
+  graph-based `simulate(..., graph=...)` calls for both path-like and branching
+  topologies.
 
 If the public simulation interface changes, update `tutorial.py` in the same
 change set.
@@ -22,12 +22,12 @@ These are the supported example workflows.
 
 ### Data generation
 
-- `run_linear_continuous_program.py`: canonical linear example for
+- `run_linear_continuous_program.py`: canonical path-graph example for
   `alpha_source_mode="continuous_program"`.
-- `run_bifurcation_state_anchor.py`: canonical bifurcation example for
+- `run_bifurcation_state_anchor.py`: canonical branching-graph example for
   `alpha_source_mode="state_anchor"`.
-- `run_mvp_linear.py`: compact 20-gene linear smoke example.
-- `run_mvp_bifurcation.py`: compact trunk-to-two-branch smoke example with
+- `run_mvp_linear.py`: compact 20-gene path-graph smoke example.
+- `run_mvp_bifurcation.py`: compact branching-graph smoke example with
   continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
 
@@ -56,14 +56,14 @@ python examples/run_trrust_mouse_small.py
 
 Current generated output groups are:
 
-- `examples/outputs/tutorial/`: tutorial linear and bifurcation outputs.
-- `examples/outputs/linear_continuous_program/`: canonical linear continuous
+- `examples/outputs/tutorial/`: tutorial path-graph and branching-graph outputs.
+- `examples/outputs/linear_continuous_program/`: canonical path-graph continuous
   master-program example.
-- `examples/outputs/bifurcation_state_anchor/`: canonical bifurcation
+- `examples/outputs/bifurcation_state_anchor/`: canonical branching-graph
   state-anchor example.
-- `examples/outputs/linear_20gene/`: small linear MVP sanity dataset.
+- `examples/outputs/linear_20gene/`: small path-graph MVP sanity dataset.
 - `examples/outputs/bifurcation_20gene_3master/`: small hand-built GRN
-  bifurcation dataset.
+  branching-graph dataset.
 - `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
   showcase plots.
 - `examples/outputs/trrust_mouse_small/`: external TRRUST benchmark outputs.

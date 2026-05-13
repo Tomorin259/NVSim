@@ -36,9 +36,12 @@ Example:
 ```python
 simulate(
     grn,
-    simulator="linear",
+    graph=path_graph(["early", "late"]),
     alpha_source_mode="continuous_program",
     master_programs={"g0": linear_increase(0.2, 1.2), "g1": 0.8},
+    n_cells_per_state=100,
+    root_time=3.0,
+    state_time=3.0,
 )
 ```
 
@@ -83,37 +86,37 @@ cell-type/bin production-rate tables, or estimated from external cluster-level
 TF activity. NVSim does not infer these production values from scRNA-seq by
 default.
 
-Linear example:
+Path example:
 
 ```python
 simulate(
     grn,
-    simulator="linear",
+    graph=path_graph(["progenitor", "lineage_A"]),
     alpha_source_mode="state_anchor",
     production_profile=profile,
-    parent_state="progenitor",
-    child_state="lineage_A",
     transition_schedule="sigmoid",
+    n_cells_per_state=100,
+    root_time=3.0,
+    state_time=3.0,
 )
 ```
 
-Bifurcation example:
+Branching example:
 
 ```python
 simulate(
     grn,
-    simulator="bifurcation",
+    graph=branching_graph("progenitor", ["lineage_A", "lineage_B"]),
     alpha_source_mode="state_anchor",
     production_profile=profile,
-    trunk_state="progenitor",
-    branch_child_states={"branch_0": "lineage_A", "branch_1": "lineage_B"},
     transition_schedule="sigmoid",
+    n_cells_per_state={"progenitor": 120, "lineage_A": 100, "lineage_B": 100},
+    root_time=3.0,
+    state_time={"progenitor": 3.0, "lineage_A": 4.0, "lineage_B": 4.0},
 )
 ```
 
-For bifurcation, use `trunk_state`, `branch_child_states`, and
-`transition_schedule`. This makes the parent-to-child regulatory-anchor
-transition explicit and supports `step`, `linear`, and `sigmoid`.
+For graph simulation, `production_profile.index` must cover graph states, and each edge uses `transition_schedule` to define the parent-to-child regulatory-anchor transition. `path_graph(...)` and `branching_graph(...)` are convenience helpers; arbitrary rooted DAGs can be passed through `StateGraph`.
 
 By default, production-profile columns must exactly match the resolved master
 regulators (`profile_gene_policy="exact"`). For larger real networks, use

@@ -1,8 +1,6 @@
 """NVSim: lightweight GRN-aware RNA velocity simulation utilities."""
 
 from .config import GRNConfig
-
-# GRN schema and regulation.
 from .grn import (
     GRN,
     build_graph_levels,
@@ -13,8 +11,6 @@ from .grn import (
     validate_grn,
 )
 from .regulation import compute_alpha, hill_activation, hill_repression
-
-# Master-regulator forcing definitions.
 from .production import (
     AlphaProgram,
     StateProductionProfile,
@@ -25,21 +21,21 @@ from .production import (
     sigmoid_increase,
     transition_weight,
 )
-from .modes import DifferentiationGraph
-
-# Simulation and observed-layer generation.
+from .modes import (
+    StateGraph,
+    DifferentiationGraph,
+    branching_graph,
+    coerce_graph,
+    path_graph,
+)
 from .simulate import (
     create_kinetic_vectors,
     initialize_state,
     simulate,
-    simulate_bifurcation,
-    simulate_linear,
     validate_positive_vector,
 )
 from .noise import generate_observed_counts
 from .output import make_result_dict, to_anndata
-
-# SERGIO-compatible inputs and plotting.
 from .sergio_io import SergioInputs, load_sergio_targets_regs
 from .plotting import (
     embed,
@@ -77,15 +73,17 @@ __all__ = [
     "simulate",
     "AlphaProgram",
     "StateProductionProfile",
+    "StateGraph",
     "DifferentiationGraph",
+    "coerce_graph",
+    "path_graph",
+    "branching_graph",
     "constant",
     "linear_increase",
     "linear_decrease",
     "sigmoid_increase",
     "sigmoid_decrease",
     "transition_weight",
-    "simulate_linear",
-    "simulate_bifurcation",
     "generate_observed_counts",
     "make_result_dict",
     "to_anndata",

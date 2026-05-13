@@ -7,7 +7,7 @@ spliced s(t) -> true velocity。核心方程是：
     ds/dt = beta * u - gamma * s
 
 其中 true_velocity 保存 ds/dt，true_velocity_u 保存 du/dt。
-线性轨迹和 bifurcation 都复用同一个 segment 积分器。
+所有 graph segment 都复用同一个 ODE 积分器。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .grn import GRN, build_graph_levels, calibrate_grn_half_response, estimate_state_mean_expression
-from .modes import DifferentiationGraph, coerce_differentiation_graph
+from .modes import StateGraph, DifferentiationGraph, coerce_graph
 from .noise import _resolve_capture_model_name, generate_observed_counts
 from .output import make_result_dict
 from .production import AlphaProgram, StateProductionProfile, coerce_programs, constant
@@ -27,8 +27,8 @@ from .regulation import compute_alpha
 
 
 SIMULATION_MODES = {"sergio_differentiation"}
-INITIALIZATION_POLICIES = {"random_small", "state_anchor_steady_state", "parent_terminal"}
-SAMPLING_POLICIES = {"uniform_snapshot", "sergio_transient"}
+INITIALIZATION_POLICIES = {"parent_steady_state", "parent_terminal"}
+SAMPLING_POLICIES = {"uniform_snapshot", "state_transient"}
 
 
 def _gene_index(genes: list[str] | tuple[str, ...]) -> pd.Index:
@@ -97,20 +97,12 @@ def initialize_state(
     genes: list[str] | tuple[str, ...],
     u0: object | None = None,
     s0: object | None = None,
-    low: float = 0.0,
-    high: float = 0.05,
-    seed: int | None = 0,
 ) -> tuple[pd.Series, pd.Series]:
-    """Generate or validate non-negative initial u0/s0 vectors."""
-
     index = _gene_index(genes)
-    rng = np.random.default_rng(seed)
 
     def build(values: object | None, name: str) -> pd.Series:
         if values is None:
-            if low < 0 or high < low:
-                raise ValueError("initial-state range must be non-negative and increasing")
-            return pd.Series(rng.uniform(low, high, size=len(index)), index=index, name=name)
+            return pd.Series(np.zeros(len(index), dtype=float), index=index, name=name)
         if isinstance(values, pd.Series):
             series = values.astype(float).reindex(index)
             if series.isna().any():
@@ -130,7 +122,6 @@ def initialize_state(
         return series
 
     return build(u0, "u0"), build(s0, "s0")
-
 
 def _infer_master_genes(grn: GRN) -> tuple[str, ...]:
     """Fallback master-regulator inference from network topology."""
@@ -749,7 +740,7 @@ def _resolve_mode_defaults(
     *,
     simulator: str | None,
     simulation_mode: str | None,
-    differentiation_graph: DifferentiationGraph | pd.DataFrame | dict[str, object] | None,
+    graph: StateGraph | pd.DataFrame | dict[str, object] | None,
     production_profile: StateProductionProfile | None,
     alpha_source_mode: str | None,
     initialization_policy: str | None,
@@ -758,7 +749,7 @@ def _resolve_mode_defaults(
     regulator_activity: str | None,
     auto_calibrate_half_response: bool | str | None,
 ) -> dict[str, object]:
-    resolved_graph = coerce_differentiation_graph(differentiation_graph)
+    resolved_graph = coerce_graph(graph)
     resolved_mode = None if simulation_mode is None else str(simulation_mode).strip().lower()
     if resolved_mode is not None and resolved_mode not in SIMULATION_MODES:
         raise ValueError(f"simulation_mode must be one of {sorted(SIMULATION_MODES)}")
@@ -773,22 +764,22 @@ def _resolve_mode_defaults(
 
     if resolved_mode == "sergio_differentiation":
         if production_profile is None:
-            raise ValueError("simulation_mode='sergio_differentiation' requires production_profile")
+            raise ValueError("simulation_mode=\"sergio_differentiation\" requires production_profile")
         if resolved_graph is None:
-            raise ValueError("simulation_mode='sergio_differentiation' requires differentiation_graph")
-        if resolved_simulator not in (None, "differentiation_graph"):
+            raise ValueError("simulation_mode=\"sergio_differentiation\" requires graph")
+        if resolved_simulator not in (None, "graph"):
             raise ValueError(
-                "simulation_mode='sergio_differentiation' is incompatible with simulator="
-                f"{resolved_simulator!r}; use simulator='differentiation_graph' or omit it"
+                "simulation_mode=\"sergio_differentiation\" is incompatible with simulator="
+                f"{resolved_simulator!r}; use simulator=\"graph\" or omit it"
             )
         if resolved_alpha_source_mode not in (None, "state_anchor"):
-            raise ValueError("simulation_mode='sergio_differentiation' requires alpha_source_mode='state_anchor'")
-        resolved_simulator = "differentiation_graph"
+            raise ValueError("simulation_mode=\"sergio_differentiation\" requires alpha_source_mode=\"state_anchor\"")
+        resolved_simulator = "graph"
         resolved_alpha_source_mode = "state_anchor"
         if resolved_initialization_policy is None:
-            resolved_initialization_policy = "state_anchor_steady_state"
+            resolved_initialization_policy = "parent_steady_state"
         if resolved_sampling_policy is None:
-            resolved_sampling_policy = "sergio_transient"
+            resolved_sampling_policy = "state_transient"
         if resolved_transition_schedule is None:
             resolved_transition_schedule = "step"
         if resolved_regulator_activity is None:
@@ -796,12 +787,16 @@ def _resolve_mode_defaults(
         if resolved_auto_calibration is None:
             resolved_auto_calibration = "if_missing"
 
+    if resolved_graph is None:
+        raise ValueError("graph must be provided; graph is now the only supported simulator topology")
     if resolved_simulator is None:
-        resolved_simulator = "differentiation_graph" if resolved_graph is not None else "linear"
+        resolved_simulator = "graph"
+    if resolved_simulator != "graph":
+        raise ValueError("simulator must be \"graph\"")
     if resolved_initialization_policy is None:
-        resolved_initialization_policy = "random_small"
+        resolved_initialization_policy = "parent_terminal"
     if resolved_sampling_policy is None:
-        resolved_sampling_policy = "uniform_snapshot"
+        resolved_sampling_policy = "state_transient"
     if resolved_transition_schedule is None:
         resolved_transition_schedule = "sigmoid"
     if resolved_regulator_activity is None:
@@ -817,7 +812,7 @@ def _resolve_mode_defaults(
     return {
         "simulation_mode": resolved_mode,
         "simulator": resolved_simulator,
-        "differentiation_graph": resolved_graph,
+        "graph": resolved_graph,
         "alpha_source_mode": resolved_alpha_source_mode,
         "initialization_policy": resolved_initialization_policy,
         "sampling_policy": resolved_sampling_policy,
@@ -826,21 +821,18 @@ def _resolve_mode_defaults(
         "auto_calibrate_half_response": resolved_auto_calibration,
     }
 
-
-def _state_anchor_steady_state_table(
+def _steady_state_table_from_source_rates(
     grn: GRN,
-    production_profile: StateProductionProfile,
+    source_rates: pd.DataFrame,
     *,
     master_genes: tuple[str, ...],
     beta: pd.Series,
     gamma: pd.Series,
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
 ) -> dict[str, dict[str, pd.Series]]:
-    """Estimate per-state steady-state alpha/u/s values for state-anchor runs."""
-
     state_alpha, _ = estimate_state_mean_expression(
         grn,
-        production_profile.rates,
+        source_rates,
         explicit_master_regulators=master_genes,
         target_leak_alpha=target_leak_alpha,
     )
@@ -849,27 +841,63 @@ def _state_anchor_steady_state_table(
     steady_states: dict[str, dict[str, pd.Series]] = {}
     beta_series = beta.reindex(grn.genes).astype(float)
     gamma_series = gamma.reindex(grn.genes).astype(float)
-    for state in production_profile.states:
+    beta_arr = beta_series.to_numpy(dtype=float)
+    gamma_arr = gamma_series.to_numpy(dtype=float)
+    for state in source_rates.index.astype(str):
         alpha = state_alpha.loc[str(state)].astype(float)
         u = np.divide(
             alpha.to_numpy(dtype=float),
-            beta_series.to_numpy(dtype=float),
+            beta_arr,
             out=np.zeros(len(grn.genes), dtype=float),
-            where=beta_series.to_numpy(dtype=float) > 0,
+            where=beta_arr > 0,
         )
         s = np.divide(
-            alpha.to_numpy(dtype=float),
-            gamma_series.to_numpy(dtype=float),
+            beta_arr * u,
+            gamma_arr,
             out=np.zeros(len(grn.genes), dtype=float),
-            where=gamma_series.to_numpy(dtype=float) > 0,
+            where=gamma_arr > 0,
         )
         steady_states[str(state)] = {
-            "alpha": pd.Series(np.maximum(alpha.to_numpy(dtype=float), 0.0), index=pd.Index(grn.genes, name="gene")),
-            "u": pd.Series(np.maximum(u, 0.0), index=pd.Index(grn.genes, name="gene")),
-            "s": pd.Series(np.maximum(s, 0.0), index=pd.Index(grn.genes, name="gene")),
+            "alpha": alpha.reindex(grn.genes),
+            "u": pd.Series(u, index=pd.Index(grn.genes, name="gene"), dtype=float),
+            "s": pd.Series(s, index=pd.Index(grn.genes, name="gene"), dtype=float),
         }
     return steady_states
 
+
+def _source_rates_from_program_starts(
+    *,
+    states: tuple[str, ...],
+    state_offsets: Mapping[str, float],
+    total_program_time: float,
+    master_genes: tuple[str, ...],
+    base_programs: Mapping[str, AlphaProgram],
+    state_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None,
+) -> pd.DataFrame:
+    rows: dict[str, dict[str, float]] = {}
+    total = max(float(total_program_time), 1e-8)
+    for state in states:
+        merged = _merge_programs(base_programs, None if state_master_programs is None else state_master_programs.get(state))
+        normalized_t = float(np.clip(float(state_offsets[state]) / total, 0.0, 1.0))
+        rows[str(state)] = {
+            gene: float(merged.get(gene, constant(0.0)).value(normalized_t))
+            for gene in master_genes
+        }
+    return pd.DataFrame.from_dict(rows, orient="index").reindex(index=list(states), columns=list(master_genes), fill_value=0.0)
+
+
+def _graph_total_program_time(
+    states: tuple[str, ...],
+    state_offsets: Mapping[str, float],
+    state_durations: Mapping[str, float],
+    root_states: tuple[str, ...],
+    root_time: float,
+) -> float:
+    maxima = []
+    for state in states:
+        duration = float(root_time) if state in root_states else float(state_durations[state])
+        maxima.append(float(state_offsets[state]) + duration)
+    return max(maxima) if maxima else float(root_time)
 
 def _prepare_common_inputs(
     grn: GRN,
@@ -885,7 +913,7 @@ def _prepare_common_inputs(
         raise ValueError("default_master_alpha must be non-negative")
     genes = grn.genes
     beta_series, gamma_series = create_kinetic_vectors(genes, beta=beta, gamma=gamma, seed=seed)
-    u0_series, s0_series = initialize_state(genes, u0=u0, s0=s0, seed=seed + 1)
+    u0_series, s0_series = initialize_state(genes, u0=u0, s0=s0)
     return (
         beta_series,
         gamma_series,
@@ -1002,673 +1030,8 @@ def _merge_programs(
     if overrides:
         merged.update(coerce_programs(overrides))
     return merged
-def _branch_programs_differ(
-    base_programs: Mapping[str, AlphaProgram],
-    branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None,
-    master_genes: tuple[str, ...],
-) -> bool:
-    if branch_master_programs is None:
-        return False
-    branch0 = _merge_programs(base_programs, branch_master_programs.get("branch_0"))
-    branch1 = _merge_programs(base_programs, branch_master_programs.get("branch_1"))
-    for gene in master_genes:
-        program0 = branch0.get(gene, constant(0.0))
-        program1 = branch1.get(gene, constant(0.0))
-        for t in (0.0, 0.5, 1.0):
-            if not np.isclose(program0.value(t), program1.value(t)):
-                return True
-    return False
 
-
-def _simulate_linear_impl(
-    grn: GRN,
-    n_cells: int = 100,
-    time_end: float = 1.0,
-    dt: float = 0.01,
-    beta: object | None = None,
-    gamma: object | None = None,
-    u0: object | None = None,
-    s0: object | None = None,
-    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
-    production_profile: StateProductionProfile | None = None,
-    production_state: str | None = None,
-    master_programs: Mapping[str, AlphaProgram | float] | None = None,
-    default_master_alpha: float = 0.5,
-    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
-    alpha_max: float | None = None,
-    seed: int = 0,
-    noise_seed: int | None = None,
-    capture_rate: float | None = None,
-    poisson_observed: bool = True,
-    dropout_rate: float = 0.0,
-    capture_model: str | None = None,
-    regulator_activity: str = "spliced",
-    auto_calibrate_half_response: bool | str = False,
-    grn_calibration: Mapping[str, object] | None = None,
-    return_edge_contributions: bool = False,
-    allow_profile_targets_as_masters: bool = False,
-    allow_snapshot_replacement: bool = False,
-    alpha_source_mode: str | None = None,
-    parent_state: str | None = None,
-    child_state: str | None = None,
-    transition_schedule: str = "sigmoid",
-    transition_midpoint: float = 0.5,
-    transition_steepness: float = 10.0,
-    profile_gene_policy: str = "exact",
-) -> dict:
-    """Simulate a linear GRN-aware RNA velocity trajectory.
-
-    The ODE is integrated on a dense fixed time grid with RK4. Snapshot cells are
-    sampled from that grid, and observed layers are generated separately from the
-    true layers. Returned layer matrices are cells x genes; internal time-course
-    arrays are timepoints x genes. If ``production_profile`` is supplied,
-    source/master alpha values are taken from ``production_state`` and take
-    precedence over ``master_programs``.
-    """
-
-    (
-        beta_series,
-        gamma_series,
-        _u0_series,
-        _s0_series,
-        beta_arr,
-        gamma_arr,
-        u0_arr,
-        s0_arr,
-        programs,
-    ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
-    master_genes, master_metadata = _resolve_master_genes(
-        grn,
-        master_regulators=master_regulators,
-        production_profile=production_profile,
-        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
-        profile_gene_policy=profile_gene_policy,
-    )
-    resolved_alpha_source_mode = _resolve_alpha_source_mode(
-        alpha_source_mode,
-        production_profile=production_profile,
-        production_state=production_state,
-        parent_state=parent_state,
-        child_state=child_state,
-    )
-    source_alpha = None
-    source_alpha_fn = None
-    if resolved_alpha_source_mode == "state_anchor":
-        if production_profile is None:
-            raise ValueError("state_anchor state arguments require production_profile")
-        _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
-        if parent_state is not None or child_state is not None:
-            if parent_state is None or child_state is None:
-                raise ValueError("parent_state and child_state must be provided together for state_anchor transitions")
-            production_profile.validate_states([parent_state, child_state])
-            source_alpha_fn = _state_transition_source_alpha_fn(
-                production_profile,
-                parent_state,
-                child_state,
-                0.0,
-                time_end,
-                grn.genes,
-                master_genes,
-                default_master_alpha,
-                profile_gene_policy,
-                transition_schedule,
-                transition_midpoint,
-                transition_steepness,
-            )
-        else:
-            if production_state is None:
-                raise ValueError("production_state must be provided for static state_anchor mode")
-            production_profile.validate_states([production_state])
-    elif production_profile is not None and (production_state is not None or parent_state is not None or child_state is not None):
-        raise ValueError("production_profile states require alpha_source_mode='state_anchor'")
-    grn, grn_calibration = _maybe_calibrate_grn(
-        grn,
-        master_genes=master_genes,
-        production_profile=production_profile,
-        auto_calibrate_half_response=auto_calibrate_half_response,
-        grn_calibration=grn_calibration,
-        target_leak_alpha=target_leak_alpha,
-    )
-    if resolved_alpha_source_mode == "state_anchor" and source_alpha_fn is None:
-        source_alpha = _source_alpha_from_profile(
-            production_profile,
-            production_state,
-            grn.genes,
-            master_genes,
-            default_master_alpha,
-            profile_gene_policy,
-        )
-
-    segment = _simulate_segment(
-        grn=grn,
-        master_genes=master_genes,
-        beta=beta_arr,
-        gamma=gamma_arr,
-        u0=u0_arr,
-        s0=s0_arr,
-        time_end=time_end,
-        dt=dt,
-        master_programs=programs,
-        default_master_alpha=default_master_alpha,
-        target_leak_alpha=target_leak_alpha,
-        alpha_max=alpha_max,
-        time_offset=0.0,
-        program_time_end=time_end,
-        source_alpha=source_alpha,
-        source_alpha_fn=source_alpha_fn,
-        regulator_activity=regulator_activity,
-        return_edge_contributions=return_edge_contributions,
-    )
-
-    # snapshot sampling：先模拟连续时间过程，再抽样为离散细胞。
-    rng = np.random.default_rng(seed)
-    sampled_idx, sampling_metadata = _sample_snapshots(
-        rng,
-        n_cells,
-        np.arange(segment["u"].shape[0]),
-        allow_snapshot_replacement=allow_snapshot_replacement,
-    )
-    true_u = segment["u"][sampled_idx]
-    true_s = segment["s"][sampled_idx]
-    true_v = segment["velocity"][sampled_idx]
-    true_velocity_u = segment["true_velocity_u"][sampled_idx]
-    true_alpha = segment["alpha"][sampled_idx]
-    resolved_capture_model = _resolve_capture_model_name(capture_model)
-    observed = _observed_from_true(
-        true_u,
-        true_s,
-        seed=seed,
-        noise_seed=noise_seed,
-        capture_rate=capture_rate,
-        poisson_observed=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=resolved_capture_model,
-    )
-
-    obs = pd.DataFrame(
-        {
-            "pseudotime": segment["pseudotime"][sampled_idx],
-            "local_time": segment["local_time"][sampled_idx],
-            "branch": "linear",
-            "time_index": sampled_idx,
-            "segment_time_index": sampled_idx,
-            "global_time_index": sampled_idx,
-        },
-        index=[f"cell_{i}" for i in range(n_cells)],
-    )
-    time_grid = pd.DataFrame(
-        {
-            "time": segment["pseudotime"],
-            "local_time": segment["local_time"],
-            "branch": "linear",
-            "global_time_index": np.arange(segment["u"].shape[0]),
-        }
-    )
-    config = {
-        "model": "linear_ode_mvp",
-        "time_end": time_end,
-        "dt": dt,
-        "actual_dt": float(segment["actual_dt"]),
-        "n_timepoints": int(segment["u"].shape[0]),
-        "n_cells": n_cells,
-        "seed": seed,
-        "integrator": "rk4",
-        "alpha_max": alpha_max,
-        "default_master_alpha": default_master_alpha,
-        "explicit_master_regulators": list(master_genes),
-        "resolved_master_regulator_source": master_metadata["resolved_master_regulator_source"],
-        "incoming_edges_to_masters_count": master_metadata["incoming_edges_to_masters_count"],
-        "incoming_edges_to_masters": master_metadata["incoming_edges_to_masters"],
-        "allow_profile_targets_as_masters": allow_profile_targets_as_masters,
-        "alpha_source_mode": resolved_alpha_source_mode,
-        "master_programs": _serialize_master_programs(programs),
-        "production_profile": production_profile is not None,
-        "production_profile_states": list(production_profile.states) if production_profile is not None else None,
-        "production_profile_master_genes": list(production_profile.genes) if production_profile is not None else None,
-        "production_state": production_state,
-        "profile_gene_policy": profile_gene_policy if resolved_alpha_source_mode == "state_anchor" else None,
-        "parent_state": parent_state,
-        "child_state": child_state,
-        "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
-        "transition_midpoint": transition_midpoint if resolved_alpha_source_mode == "state_anchor" else None,
-        "transition_steepness": transition_steepness if resolved_alpha_source_mode == "state_anchor" else None,
-        "auto_calibrate_half_response": auto_calibrate_half_response,
-        "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
-        "capture_rate": capture_rate,
-        "capture_model": resolved_capture_model,
-        "regulator_activity": regulator_activity,
-        "poisson_observed": poisson_observed,
-        "dropout_rate": dropout_rate,
-        "return_edge_contributions": return_edge_contributions,
-        "sampling_replace": sampling_metadata["sampling_replace"],
-        "n_unique_timepoints_sampled": sampling_metadata["n_unique_timepoints_sampled"],
-        "n_duplicate_snapshot_cells": sampling_metadata["n_duplicate_snapshot_cells"],
-        "time_index_scope": "segment_local",
-    }
-    noise_config = {
-        "capture_model": config["capture_model"],
-        "capture_rate": capture_rate,
-        "poisson_observed": poisson_observed,
-        "dropout_rate": dropout_rate,
-    }
-
-    edge_contributions = segment.get("edge_contributions")
-    sampled_edge_contributions = None if edge_contributions is None else edge_contributions[sampled_idx]
-
-    return make_result_dict(
-        true_unspliced=true_u,
-        true_spliced=true_s,
-        true_velocity=true_v,
-        velocity_u=true_velocity_u,
-        true_alpha=true_alpha,
-        observed_unspliced=observed["unspliced"],
-        observed_spliced=observed["spliced"],
-        obs=obs,
-        var=_gene_metadata(grn, master_genes, beta=beta_series, gamma=gamma_series),
-        grn=grn,
-        beta=beta_series,
-        gamma=gamma_series,
-        simulation_config=config,
-        grn_calibration=_grn_calibration_summary(grn, master_genes, grn_calibration=grn_calibration),
-        noise_config=noise_config,
-        time_grid=time_grid,
-        edge_contributions=sampled_edge_contributions,
-        edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
-    )
-
-
-def _simulate_bifurcation_impl(
-    grn: GRN,
-    n_trunk_cells: int = 50,
-    n_branch_cells: int | Mapping[str, int] = 60,
-    trunk_time: float = 2.0,
-    branch_time: float = 2.0,
-    dt: float = 0.01,
-    beta: object | None = None,
-    gamma: object | None = None,
-    u0: object | None = None,
-    s0: object | None = None,
-    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
-    production_profile: StateProductionProfile | None = None,
-    master_programs: Mapping[str, AlphaProgram | float] | None = None,
-    branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
-    default_master_alpha: float = 0.5,
-    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
-    alpha_max: float | None = None,
-    seed: int = 0,
-    noise_seed: int | None = None,
-    capture_rate: float | None = None,
-    poisson_observed: bool = True,
-    dropout_rate: float = 0.0,
-    capture_model: str | None = None,
-    regulator_activity: str = "spliced",
-    auto_calibrate_half_response: bool | str = False,
-    grn_calibration: Mapping[str, object] | None = None,
-    return_edge_contributions: bool = False,
-    allow_profile_targets_as_masters: bool = False,
-    include_branch_initial_state: bool = False,
-    allow_snapshot_replacement: bool = False,
-    alpha_source_mode: str | None = None,
-    trunk_state: str | None = None,
-    branch_child_states: Mapping[str, str] | tuple[str, str] | list[str] | None = None,
-    transition_schedule: str = "sigmoid",
-    transition_midpoint: float = 0.5,
-    transition_steepness: float = 10.0,
-    profile_gene_policy: str = "exact",
-) -> dict:
-    """Simulate a trunk-to-two-branch RNA velocity trajectory.
-
-    The trunk is simulated first. The terminal trunk ``u`` and ``s`` vectors are
-    copied into each branch initial state, then each branch is integrated as an
-    independent segment. Returned layer matrices are cells x genes; internal
-    ``uns["segment_time_courses"]`` arrays are timepoints x genes. If no
-    ``branch_master_programs`` are supplied, both branches share the same master
-    regulator programs and may follow identical dynamics from the inherited
-    state. For production-profile runs, use the canonical state-anchor
-    interface: ``trunk_state`` + ``branch_child_states`` +
-    ``transition_schedule``.
-    """
-
-    branch_labels = ("branch_0", "branch_1")
-    (
-        beta_series,
-        gamma_series,
-        _u0_series,
-        _s0_series,
-        beta_arr,
-        gamma_arr,
-        u0_arr,
-        s0_arr,
-        programs,
-    ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
-    master_genes, master_metadata = _resolve_master_genes(
-        grn,
-        master_regulators=master_regulators,
-        production_profile=production_profile,
-        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
-        profile_gene_policy=profile_gene_policy,
-    )
-    resolved_trunk_state = trunk_state
-    resolved_branch_child_states = _resolve_branch_child_states(branch_child_states, branch_labels)
-    resolved_alpha_source_mode = _resolve_alpha_source_mode(
-        alpha_source_mode,
-        production_profile=production_profile,
-        production_state=resolved_trunk_state,
-        state_args_present=branch_child_states is not None,
-    )
-    trunk_source_alpha = None
-    branch_source_alpha: dict[str, pd.Series] = {}
-    branch_source_alpha_fns: dict[str, Callable[[float], pd.Series]] = {}
-    if resolved_alpha_source_mode == "state_anchor":
-        if production_profile is None:
-            raise ValueError("state_anchor state arguments require production_profile")
-        if resolved_trunk_state is None:
-            raise ValueError("trunk_state must be provided for state_anchor bifurcation")
-        if resolved_branch_child_states is None:
-            raise ValueError("branch_child_states must be provided for state_anchor bifurcation")
-        _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
-        production_profile.validate_states(
-            [resolved_trunk_state, *(resolved_branch_child_states[branch] for branch in branch_labels)]
-        )
-    elif production_profile is not None:
-        raise ValueError("production_profile requires alpha_source_mode='state_anchor' for bifurcation")
-    grn, grn_calibration = _maybe_calibrate_grn(
-        grn,
-        master_genes=master_genes,
-        production_profile=production_profile,
-        auto_calibrate_half_response=auto_calibrate_half_response,
-        grn_calibration=grn_calibration,
-        target_leak_alpha=target_leak_alpha,
-    )
-    if resolved_alpha_source_mode == "state_anchor":
-        trunk_source_alpha = _source_alpha_from_profile(
-            production_profile,
-            resolved_trunk_state,
-            grn.genes,
-            master_genes,
-            default_master_alpha,
-            profile_gene_policy,
-        )
-        for branch in branch_labels:
-            child_state = resolved_branch_child_states[branch]
-            branch_source_alpha_fns[branch] = _state_transition_source_alpha_fn(
-                production_profile,
-                resolved_trunk_state,
-                child_state,
-                trunk_time,
-                branch_time,
-                grn.genes,
-                master_genes,
-                default_master_alpha,
-                profile_gene_policy,
-                transition_schedule,
-                transition_midpoint,
-                transition_steepness,
-            )
-
-    total_program_time = trunk_time + branch_time
-    branch_divergence_source = "none"
-    branch_divergence_configured = False
-    if resolved_alpha_source_mode == "state_anchor" and resolved_branch_child_states is not None:
-        if resolved_branch_child_states.get("branch_0") != resolved_branch_child_states.get("branch_1"):
-            branch_divergence_source = "state_anchor"
-            branch_divergence_configured = True
-    if _branch_programs_differ(programs, branch_master_programs, master_genes):
-        branch_divergence_source = "branch_master_programs"
-        branch_divergence_configured = True
-    if not branch_divergence_configured:
-        warnings.warn(
-            "Branches share identical dynamics; this is a duplicated-branch control, not a true bifurcation.",
-            UserWarning,
-            stacklevel=2,
-        )
-
-    trunk = _simulate_segment(
-        grn=grn,
-        master_genes=master_genes,
-        beta=beta_arr,
-        gamma=gamma_arr,
-        u0=u0_arr,
-        s0=s0_arr,
-        time_end=trunk_time,
-        dt=dt,
-        master_programs=programs,
-        default_master_alpha=default_master_alpha,
-        target_leak_alpha=target_leak_alpha,
-        alpha_max=alpha_max,
-        time_offset=0.0,
-        program_time_end=total_program_time,
-        source_alpha=trunk_source_alpha,
-        regulator_activity=regulator_activity,
-        return_edge_contributions=return_edge_contributions,
-    )
-    # bifurcation 的关键：两个 branch 必须继承同一个 trunk terminal state。
-    inherited_u = trunk["u"][-1].copy()
-    inherited_s = trunk["s"][-1].copy()
-
-    branch_segments: dict[str, dict[str, np.ndarray]] = {}
-    for branch in branch_labels:
-        branch_segments[branch] = _simulate_segment(
-            grn=grn,
-            master_genes=master_genes,
-            beta=beta_arr,
-            gamma=gamma_arr,
-            u0=inherited_u.copy(),
-            s0=inherited_s.copy(),
-            time_end=branch_time,
-            dt=dt,
-            master_programs=_merge_programs(programs, None if branch_master_programs is None else branch_master_programs.get(branch)),
-            default_master_alpha=default_master_alpha,
-            target_leak_alpha=target_leak_alpha,
-            alpha_max=alpha_max,
-            time_offset=trunk_time,
-            program_time_end=total_program_time,
-            source_alpha=branch_source_alpha.get(branch),
-            source_alpha_fn=branch_source_alpha_fns.get(branch),
-            regulator_activity=regulator_activity,
-            return_edge_contributions=return_edge_contributions,
-        )
-
-    rng = np.random.default_rng(seed)
-    sampled_segments: list[tuple[str, dict[str, np.ndarray], np.ndarray]] = []
-    trunk_idx, trunk_sampling = _sample_snapshots(
-        rng,
-        n_trunk_cells,
-        np.arange(trunk["u"].shape[0]),
-        allow_snapshot_replacement=allow_snapshot_replacement,
-    )
-    sampled_segments.append(("trunk", trunk, trunk_idx))
-    sampling_summary: dict[str, dict[str, int | bool]] = {"trunk": trunk_sampling}
-    for branch in branch_labels:
-        count = n_branch_cells[branch] if isinstance(n_branch_cells, Mapping) else n_branch_cells
-        available_branch_indices = np.arange(branch_segments[branch]["u"].shape[0])
-        if not include_branch_initial_state:
-            available_branch_indices = available_branch_indices[available_branch_indices != 0]
-            if available_branch_indices.size == 0:
-                raise ValueError(
-                    f"branch {branch} has no sampleable timepoints after excluding the inherited initial state; "
-                    "increase branch_time / reduce dt, or set include_branch_initial_state=True."
-                )
-        branch_idx, branch_sampling = _sample_snapshots(
-            rng,
-            int(count),
-            available_branch_indices,
-            allow_snapshot_replacement=allow_snapshot_replacement,
-        )
-        sampled_segments.append((branch, branch_segments[branch], branch_idx))
-        sampling_summary[branch] = branch_sampling
-
-    # 按 trunk, branch_0, branch_1 拼接，保证 layers 与 obs 行顺序一致。
-    true_u = np.concatenate([segment["u"][idx] for _, segment, idx in sampled_segments], axis=0)
-    true_s = np.concatenate([segment["s"][idx] for _, segment, idx in sampled_segments], axis=0)
-    true_v = np.concatenate([segment["velocity"][idx] for _, segment, idx in sampled_segments], axis=0)
-    true_velocity_u = np.concatenate([segment["true_velocity_u"][idx] for _, segment, idx in sampled_segments], axis=0)
-    true_alpha = np.concatenate([segment["alpha"][idx] for _, segment, idx in sampled_segments], axis=0)
-    resolved_capture_model = _resolve_capture_model_name(capture_model)
-    observed = _observed_from_true(
-        true_u,
-        true_s,
-        seed=seed,
-        noise_seed=noise_seed,
-        capture_rate=capture_rate,
-        poisson_observed=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=resolved_capture_model,
-    )
-
-    trunk_global = np.arange(trunk["u"].shape[0], dtype=int)
-    branch0_global = np.arange(trunk_global[-1] + 1, trunk_global[-1] + 1 + branch_segments["branch_0"]["u"].shape[0], dtype=int)
-    branch1_global = np.arange(branch0_global[-1] + 1, branch0_global[-1] + 1 + branch_segments["branch_1"]["u"].shape[0], dtype=int)
-    global_index_map = {"trunk": trunk_global, "branch_0": branch0_global, "branch_1": branch1_global}
-
-    obs_frames = []
-    offset = 0
-    for branch, segment, idx in sampled_segments:
-        n = len(idx)
-        global_idx = global_index_map[branch][idx]
-        obs_frames.append(
-            pd.DataFrame(
-                {
-                    "pseudotime": segment["pseudotime"][idx],
-                    "local_time": segment["local_time"][idx],
-                    "branch": branch,
-                    "segment": branch,
-                    "segment_time_index": idx,
-                    "global_time_index": global_idx,
-                    "time_index": idx,
-                },
-                index=[f"cell_{i}" for i in range(offset, offset + n)],
-            )
-        )
-        offset += n
-    obs = pd.concat(obs_frames, axis=0)
-
-    time_grid = pd.concat(
-        [
-            pd.DataFrame(
-                {
-                    "pseudotime": trunk["pseudotime"],
-                    "local_time": trunk["local_time"],
-                    "branch": "trunk",
-                    "global_time_index": trunk_global,
-                }
-            ),
-            *[
-                pd.DataFrame(
-                    {
-                        "pseudotime": branch_segments[branch]["pseudotime"],
-                        "local_time": branch_segments[branch]["local_time"],
-                        "branch": branch,
-                        "global_time_index": global_index_map[branch],
-                    }
-                )
-                for branch in branch_labels
-            ],
-        ],
-        ignore_index=True,
-    )
-    total_cells = int(obs.shape[0])
-    config = {
-        "model": "bifurcation_ode_mvp",
-        "trunk_time": trunk_time,
-        "branch_time": branch_time,
-        "dt": dt,
-        "actual_dt_trunk": float(trunk["actual_dt"]),
-        "actual_dt_branch_0": float(branch_segments["branch_0"]["actual_dt"]),
-        "actual_dt_branch_1": float(branch_segments["branch_1"]["actual_dt"]),
-        "n_trunk_cells": n_trunk_cells,
-        "n_branch_cells": dict(n_branch_cells) if isinstance(n_branch_cells, Mapping) else {b: int(n_branch_cells) for b in branch_labels},
-        "n_cells": total_cells,
-        "branch_labels": list(branch_labels),
-        "seed": seed,
-        "integrator": "rk4",
-        "alpha_max": alpha_max,
-        "default_master_alpha": default_master_alpha,
-        "explicit_master_regulators": list(master_genes),
-        "resolved_master_regulator_source": master_metadata["resolved_master_regulator_source"],
-        "incoming_edges_to_masters_count": master_metadata["incoming_edges_to_masters_count"],
-        "incoming_edges_to_masters": master_metadata["incoming_edges_to_masters"],
-        "allow_profile_targets_as_masters": allow_profile_targets_as_masters,
-        "alpha_source_mode": resolved_alpha_source_mode,
-        "master_programs": _serialize_master_programs(programs),
-        "production_profile": production_profile is not None,
-        "production_profile_states": list(production_profile.states) if production_profile is not None else None,
-        "production_profile_master_genes": list(production_profile.genes) if production_profile is not None else None,
-        "trunk_state": resolved_trunk_state,
-        "branch_child_states": dict(resolved_branch_child_states) if resolved_branch_child_states is not None else None,
-        "profile_gene_policy": profile_gene_policy if resolved_alpha_source_mode == "state_anchor" else None,
-        "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
-        "transition_midpoint": transition_midpoint if resolved_alpha_source_mode == "state_anchor" else None,
-        "transition_steepness": transition_steepness if resolved_alpha_source_mode == "state_anchor" else None,
-        "auto_calibrate_half_response": auto_calibrate_half_response,
-        "branch_master_programs_enabled": branch_master_programs is not None,
-        "branch_divergence_configured": branch_divergence_configured,
-        "branch_divergence_source": branch_divergence_source,
-        "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
-        "capture_rate": capture_rate,
-        "capture_model": resolved_capture_model,
-        "regulator_activity": regulator_activity,
-        "poisson_observed": poisson_observed,
-        "dropout_rate": dropout_rate,
-        "return_edge_contributions": return_edge_contributions,
-        "include_branch_initial_state": include_branch_initial_state,
-        "sampling_replace": any(item["sampling_replace"] for item in sampling_summary.values()),
-        "n_unique_timepoints_sampled": int(sum(item["n_unique_timepoints_sampled"] for item in sampling_summary.values())),
-        "n_duplicate_snapshot_cells": int(sum(item["n_duplicate_snapshot_cells"] for item in sampling_summary.values())),
-        "sampling_summary": sampling_summary,
-        "time_index_scope": "segment_local",
-    }
-    noise_config = {
-        "capture_model": config["capture_model"],
-        "capture_rate": capture_rate,
-        "poisson_observed": poisson_observed,
-        "dropout_rate": dropout_rate,
-    }
-
-    sampled_edge_contributions = None
-    if return_edge_contributions:
-        sampled_edge_contributions = np.concatenate(
-            [segment["edge_contributions"][idx] for _, segment, idx in sampled_segments],
-            axis=0,
-        )
-
-    result = make_result_dict(
-        true_unspliced=true_u,
-        true_spliced=true_s,
-        true_velocity=true_v,
-        velocity_u=true_velocity_u,
-        true_alpha=true_alpha,
-        observed_unspliced=observed["unspliced"],
-        observed_spliced=observed["spliced"],
-        obs=obs,
-        var=_gene_metadata(grn, master_genes, beta=beta_series, gamma=gamma_series),
-        grn=grn,
-        beta=beta_series,
-        gamma=gamma_series,
-        simulation_config=config,
-        grn_calibration=_grn_calibration_summary(grn, master_genes, grn_calibration=grn_calibration),
-        noise_config=noise_config,
-        time_grid=time_grid,
-        edge_contributions=sampled_edge_contributions,
-        edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
-    )
-    result["uns"]["segment_time_courses"] = {
-        "trunk": trunk,
-        "branch_0": branch_segments["branch_0"],
-        "branch_1": branch_segments["branch_1"],
-    }
-    result["uns"]["branch_inheritance"] = {
-        "trunk_terminal_u": inherited_u.copy(),
-        "trunk_terminal_s": inherited_s.copy(),
-        "branch_0_initial_u": branch_segments["branch_0"]["u"][0].copy(),
-        "branch_0_initial_s": branch_segments["branch_0"]["s"][0].copy(),
-        "branch_1_initial_u": branch_segments["branch_1"]["u"][0].copy(),
-        "branch_1_initial_s": branch_segments["branch_1"]["s"][0].copy(),
-    }
-    return result
-
-
-def _simulate_differentiation_graph_impl(
+def _simulate_graph_impl(
     grn: GRN,
     n_cells_per_state: int | Mapping[str, int] = 60,
     root_time: float = 2.0,
@@ -1679,8 +1042,10 @@ def _simulate_differentiation_graph_impl(
     u0: object | None = None,
     s0: object | None = None,
     master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
+    graph: StateGraph | pd.DataFrame | dict[str, object] | None = None,
     production_profile: StateProductionProfile | None = None,
     master_programs: Mapping[str, AlphaProgram | float] | None = None,
+    state_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
     default_master_alpha: float = 0.5,
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     alpha_max: float | None = None,
@@ -1697,26 +1062,17 @@ def _simulate_differentiation_graph_impl(
     allow_profile_targets_as_masters: bool = False,
     allow_snapshot_replacement: bool = False,
     alpha_source_mode: str | None = None,
-    initialization_policy: str = "state_anchor_steady_state",
-    sampling_policy: str = "sergio_transient",
-    differentiation_graph: DifferentiationGraph | pd.DataFrame | dict[str, object] | None = None,
-    transition_schedule: str = "step",
+    initialization_policy: str = "parent_terminal",
+    sampling_policy: str = "state_transient",
+    transition_schedule: str = "sigmoid",
     transition_midpoint: float = 0.5,
     transition_steepness: float = 10.0,
     profile_gene_policy: str = "exact",
     simulation_mode: str | None = None,
 ) -> dict:
-    """Simulate a SERGIO-style differentiation graph on top of the NVSim ODE kernel."""
-
-    resolved_graph = coerce_differentiation_graph(differentiation_graph)
+    resolved_graph = coerce_graph(graph)
     if resolved_graph is None:
-        raise ValueError("differentiation_graph must be provided for simulator='differentiation_graph'")
-    if production_profile is None:
-        raise ValueError("production_profile must be provided for simulator='differentiation_graph'")
-    if root_time <= 0:
-        raise ValueError("root_time must be positive")
-    if alpha_source_mode not in (None, "state_anchor"):
-        raise ValueError("differentiation_graph simulator currently requires alpha_source_mode='state_anchor'")
+        raise ValueError("graph must be provided for simulator graph")
     if initialization_policy not in INITIALIZATION_POLICIES:
         raise ValueError(f"initialization_policy must be one of {sorted(INITIALIZATION_POLICIES)}")
     if sampling_policy not in SAMPLING_POLICIES:
@@ -1740,28 +1096,9 @@ def _simulate_differentiation_graph_impl(
         allow_profile_targets_as_masters=allow_profile_targets_as_masters,
         profile_gene_policy=profile_gene_policy,
     )
-    _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
-    resolved_graph.validate_states(production_profile.states)
-    production_profile.validate_states(list(resolved_graph.states or ()))
-    grn, grn_calibration = _maybe_calibrate_grn(
-        grn,
-        master_genes=master_genes,
-        production_profile=production_profile,
-        auto_calibrate_half_response=auto_calibrate_half_response,
-        grn_calibration=grn_calibration,
-        target_leak_alpha=target_leak_alpha,
-    )
-    steady_states = _state_anchor_steady_state_table(
-        grn,
-        production_profile,
-        master_genes=master_genes,
-        beta=beta_series,
-        gamma=gamma_series,
-        target_leak_alpha=target_leak_alpha,
-    )
-
     states = tuple(str(state) for state in resolved_graph.topological_order())
     state_depths = resolved_graph.state_depths()
+    root_states = tuple(str(state) for state in resolved_graph.root_states)
     state_cell_counts = _coerce_state_scalar_mapping(
         n_cells_per_state,
         states,
@@ -1775,65 +1112,123 @@ def _simulate_differentiation_graph_impl(
         cast=lambda value: float(value),
     )
 
-    state_segments: dict[str, dict[str, np.ndarray]] = {}
-    state_initialization: dict[str, dict[str, object]] = {}
     state_offsets: dict[str, float] = {}
     for state in states:
         parent_state = resolved_graph.parent_of(state)
         if parent_state is None:
             state_offsets[state] = 0.0
-            segment_time = float(root_time)
-            source_alpha = _source_alpha_from_profile(
-                production_profile,
-                state,
-                grn.genes,
-                master_genes,
-                default_master_alpha,
-                profile_gene_policy,
-            )
-            source_alpha_fn = None
         else:
-            state_offsets[state] = state_offsets[parent_state] + float(
-                root_time if state_depths[parent_state] == 0 else state_durations[parent_state]
-            )
-            segment_time = float(state_durations[state])
-            source_alpha = None
-            source_alpha_fn = _state_transition_source_alpha_fn(
-                production_profile,
-                parent_state,
-                state,
-                state_offsets[state],
-                segment_time,
-                grn.genes,
-                master_genes,
-                default_master_alpha,
-                profile_gene_policy,
-                transition_schedule,
-                transition_midpoint,
-                transition_steepness,
-            )
+            parent_duration = float(root_time) if parent_state in root_states else float(state_durations[parent_state])
+            state_offsets[state] = float(state_offsets[parent_state]) + parent_duration
+    total_program_time = _graph_total_program_time(states, state_offsets, state_durations, root_states, root_time)
 
-        if parent_state is None:
-            if initialization_policy == "state_anchor_steady_state":
+    resolved_alpha_source_mode = _resolve_alpha_source_mode(
+        alpha_source_mode,
+        production_profile=production_profile,
+    )
+    if resolved_alpha_source_mode == "state_anchor":
+        if production_profile is None:
+            raise ValueError("alpha_source_mode state_anchor requires production_profile")
+        _validate_profile_genes(production_profile, master_genes, profile_gene_policy)
+        resolved_graph.validate_states(production_profile.states)
+        production_profile.validate_states(list(states))
+        if state_master_programs is not None:
+            raise ValueError("state_master_programs are only supported when alpha_source_mode continuous_program is active")
+    elif production_profile is not None:
+        raise ValueError("production_profile requires alpha_source_mode state_anchor")
+
+    grn, grn_calibration = _maybe_calibrate_grn(
+        grn,
+        master_genes=master_genes,
+        production_profile=production_profile,
+        auto_calibrate_half_response=auto_calibrate_half_response,
+        grn_calibration=grn_calibration,
+        target_leak_alpha=target_leak_alpha,
+    )
+
+    if resolved_alpha_source_mode == "state_anchor":
+        steady_states = _steady_state_table_from_source_rates(
+            grn,
+            production_profile.rates.reindex(index=list(states), columns=list(master_genes), fill_value=0.0),
+            master_genes=master_genes,
+            beta=beta_series,
+            gamma=gamma_series,
+            target_leak_alpha=target_leak_alpha,
+        )
+    else:
+        source_rates = _source_rates_from_program_starts(
+            states=states,
+            state_offsets=state_offsets,
+            total_program_time=total_program_time,
+            master_genes=master_genes,
+            base_programs=programs,
+            state_master_programs=state_master_programs,
+        )
+        steady_states = _steady_state_table_from_source_rates(
+            grn,
+            source_rates,
+            master_genes=master_genes,
+            beta=beta_series,
+            gamma=gamma_series,
+            target_leak_alpha=target_leak_alpha,
+        )
+
+    state_segments: dict[str, dict[str, np.ndarray]] = {}
+    state_initialization: dict[str, dict[str, object]] = {}
+    for state in states:
+        parent_state = resolved_graph.parent_of(state)
+        is_root = parent_state is None
+        segment_time = float(root_time) if is_root else float(state_durations[state])
+        merged_programs = _merge_programs(programs, None if state_master_programs is None else state_master_programs.get(state))
+
+        if resolved_alpha_source_mode == "state_anchor":
+            if is_root:
+                source_alpha = _source_alpha_from_profile(
+                    production_profile,
+                    state,
+                    grn.genes,
+                    master_genes,
+                    default_master_alpha,
+                    profile_gene_policy,
+                )
+                source_alpha_fn = None
+            else:
+                source_alpha = None
+                source_alpha_fn = _state_transition_source_alpha_fn(
+                    production_profile,
+                    parent_state,
+                    state,
+                    state_offsets[state],
+                    segment_time,
+                    grn.genes,
+                    master_genes,
+                    default_master_alpha,
+                    profile_gene_policy,
+                    transition_schedule,
+                    transition_midpoint,
+                    transition_steepness,
+                )
+        else:
+            source_alpha = None
+            source_alpha_fn = None
+
+        if is_root:
+            if u0 is not None or s0 is not None:
+                init_u = u0_arr.copy()
+                init_s = s0_arr.copy()
+                init_source = "explicit_initial_state"
+            else:
                 init_u = steady_states[state]["u"].reindex(grn.genes).to_numpy(dtype=float)
                 init_s = steady_states[state]["s"].reindex(grn.genes).to_numpy(dtype=float)
                 init_source = "state_steady_state"
-            else:
-                init_u = u0_arr.copy()
-                init_s = s0_arr.copy()
-                init_source = "user_or_random_initial_state"
-        elif initialization_policy == "state_anchor_steady_state":
+        elif initialization_policy == "parent_steady_state":
             init_u = steady_states[parent_state]["u"].reindex(grn.genes).to_numpy(dtype=float)
             init_s = steady_states[parent_state]["s"].reindex(grn.genes).to_numpy(dtype=float)
             init_source = "parent_state_steady_state"
-        elif initialization_policy == "parent_terminal":
+        else:
             init_u = state_segments[parent_state]["u"][-1].copy()
             init_s = state_segments[parent_state]["s"][-1].copy()
             init_source = "parent_terminal_state"
-        else:
-            init_u = u0_arr.copy()
-            init_s = s0_arr.copy()
-            init_source = "user_or_random_initial_state"
 
         state_initialization[state] = {
             "parent_state": parent_state,
@@ -1850,12 +1245,12 @@ def _simulate_differentiation_graph_impl(
             s0=init_s,
             time_end=segment_time,
             dt=dt,
-            master_programs=programs,
+            master_programs=merged_programs,
             default_master_alpha=default_master_alpha,
             target_leak_alpha=target_leak_alpha,
             alpha_max=alpha_max,
             time_offset=state_offsets[state],
-            program_time_end=state_offsets[state] + segment_time,
+            program_time_end=total_program_time,
             source_alpha=source_alpha,
             source_alpha_fn=source_alpha_fn,
             regulator_activity=regulator_activity,
@@ -1946,17 +1341,17 @@ def _simulate_differentiation_graph_impl(
     )
     total_cells = int(obs.shape[0])
     config = {
-        "model": "differentiation_graph_ode_mvp",
+        "model": "graph_ode_mvp",
         "simulation_mode": simulation_mode,
-        "simulator": "differentiation_graph",
+        "simulator": "graph",
         "root_time": root_time,
         "state_time": state_durations,
         "dt": dt,
         "n_cells": total_cells,
         "n_cells_per_state": state_cell_counts,
         "state_order": list(states),
-        "root_states": list(resolved_graph.root_states),
-        "differentiation_graph_edges": resolved_graph.edges.to_dict(orient="records"),
+        "root_states": list(root_states),
+        "graph_edges": resolved_graph.edges.to_dict(orient="records"),
         "seed": seed,
         "integrator": "rk4",
         "alpha_max": alpha_max,
@@ -1966,17 +1361,18 @@ def _simulate_differentiation_graph_impl(
         "incoming_edges_to_masters_count": master_metadata["incoming_edges_to_masters_count"],
         "incoming_edges_to_masters": master_metadata["incoming_edges_to_masters"],
         "allow_profile_targets_as_masters": allow_profile_targets_as_masters,
-        "alpha_source_mode": "state_anchor",
+        "alpha_source_mode": resolved_alpha_source_mode,
         "master_programs": _serialize_master_programs(programs),
-        "production_profile": True,
-        "production_profile_states": list(production_profile.states),
-        "production_profile_master_genes": list(production_profile.genes),
+        "state_master_programs_enabled": state_master_programs is not None,
+        "production_profile": production_profile is not None,
+        "production_profile_states": list(production_profile.states) if production_profile is not None else None,
+        "production_profile_master_genes": list(production_profile.genes) if production_profile is not None else None,
         "profile_gene_policy": profile_gene_policy,
         "initialization_policy": initialization_policy,
         "sampling_policy": sampling_policy,
-        "transition_schedule": transition_schedule,
-        "transition_midpoint": transition_midpoint,
-        "transition_steepness": transition_steepness,
+        "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
+        "transition_midpoint": transition_midpoint if resolved_alpha_source_mode == "state_anchor" else None,
+        "transition_steepness": transition_steepness if resolved_alpha_source_mode == "state_anchor" else None,
         "auto_calibrate_half_response": auto_calibrate_half_response,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
@@ -2026,9 +1422,9 @@ def _simulate_differentiation_graph_impl(
         edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
     )
     result["uns"]["segment_time_courses"] = state_segments
-    result["uns"]["differentiation_graph"] = {
+    result["uns"]["graph"] = {
         "states": list(states),
-        "root_states": list(resolved_graph.root_states),
+        "root_states": list(root_states),
         "edges": resolved_graph.edges.to_dict(orient="records"),
         "state_depths": state_depths,
     }
@@ -2049,25 +1445,15 @@ def simulate(
     *,
     simulator: str | None = None,
     simulation_mode: str | None = None,
-    differentiation_graph: DifferentiationGraph | pd.DataFrame | dict[str, object] | None = None,
+    graph: StateGraph | pd.DataFrame | dict[str, object] | None = None,
     initialization_policy: str | None = None,
     sampling_policy: str | None = None,
     **kwargs: object,
 ) -> dict:
-    """Unified public simulation entry point.
-
-    ``simulator`` selects which trajectory family to run. Remaining keyword
-    arguments are forwarded to the corresponding implementation:
-
-    - ``linear`` -> ``simulate_linear()`` semantics
-    - ``bifurcation`` / ``branch`` -> ``simulate_bifurcation()`` semantics
-    - ``differentiation_graph`` -> SERGIO-style state DAG differentiation
-    """
-
     resolved_mode = _resolve_mode_defaults(
         simulator=simulator,
         simulation_mode=simulation_mode,
-        differentiation_graph=differentiation_graph,
+        graph=graph,
         production_profile=kwargs.get("production_profile"),
         alpha_source_mode=kwargs.get("alpha_source_mode"),
         initialization_policy=initialization_policy,
@@ -2076,272 +1462,16 @@ def simulate(
         regulator_activity=kwargs.get("regulator_activity"),
         auto_calibrate_half_response=kwargs.get("auto_calibrate_half_response"),
     )
-    resolved = str(resolved_mode["simulator"]).strip().lower()
     patched_kwargs = dict(kwargs)
     patched_kwargs["alpha_source_mode"] = resolved_mode["alpha_source_mode"]
     patched_kwargs["regulator_activity"] = resolved_mode["regulator_activity"]
     patched_kwargs["auto_calibrate_half_response"] = resolved_mode["auto_calibrate_half_response"]
     patched_kwargs["transition_schedule"] = resolved_mode["transition_schedule"]
-    if resolved == "linear":
-        return _simulate_linear_impl(grn, **patched_kwargs)
-    if resolved in {"bifurcation", "branch"}:
-        return _simulate_bifurcation_impl(grn, **patched_kwargs)
-    if resolved == "differentiation_graph":
-        return _simulate_differentiation_graph_impl(
-            grn,
-            differentiation_graph=resolved_mode["differentiation_graph"],
-            initialization_policy=str(resolved_mode["initialization_policy"]),
-            sampling_policy=str(resolved_mode["sampling_policy"]),
-            simulation_mode=resolved_mode["simulation_mode"],
-            **patched_kwargs,
-        )
-    raise ValueError("simulator must be 'linear', 'bifurcation', 'branch', or 'differentiation_graph'")
-
-
-def simulate_linear(
-    grn: GRN,
-    n_cells: int = 100,
-    time_end: float = 1.0,
-    dt: float = 0.01,
-    beta: object | None = None,
-    gamma: object | None = None,
-    u0: object | None = None,
-    s0: object | None = None,
-    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
-    production_profile: StateProductionProfile | None = None,
-    production_state: str | None = None,
-    master_programs: Mapping[str, AlphaProgram | float] | None = None,
-    default_master_alpha: float = 0.5,
-    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
-    alpha_max: float | None = None,
-    seed: int = 0,
-    noise_seed: int | None = None,
-    capture_rate: float | None = None,
-    poisson_observed: bool = True,
-    dropout_rate: float = 0.0,
-    capture_model: str | None = None,
-    regulator_activity: str = "spliced",
-    auto_calibrate_half_response: bool | str = False,
-    grn_calibration: Mapping[str, object] | None = None,
-    return_edge_contributions: bool = False,
-    allow_profile_targets_as_masters: bool = False,
-    allow_snapshot_replacement: bool = False,
-    alpha_source_mode: str | None = None,
-    parent_state: str | None = None,
-    child_state: str | None = None,
-    transition_schedule: str = "sigmoid",
-    transition_midpoint: float = 0.5,
-    transition_steepness: float = 10.0,
-    profile_gene_policy: str = "exact",
-) -> dict:
-    """Backward-compatible linear wrapper around the unified simulate() entry."""
-
-    return simulate(
+    return _simulate_graph_impl(
         grn,
-        simulator="linear",
-        n_cells=n_cells,
-        time_end=time_end,
-        dt=dt,
-        beta=beta,
-        gamma=gamma,
-        u0=u0,
-        s0=s0,
-        master_regulators=master_regulators,
-        production_profile=production_profile,
-        production_state=production_state,
-        master_programs=master_programs,
-        default_master_alpha=default_master_alpha,
-        target_leak_alpha=target_leak_alpha,
-        alpha_max=alpha_max,
-        seed=seed,
-        noise_seed=noise_seed,
-        capture_rate=capture_rate,
-        poisson_observed=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=capture_model,
-        regulator_activity=regulator_activity,
-        auto_calibrate_half_response=auto_calibrate_half_response,
-        grn_calibration=grn_calibration,
-        return_edge_contributions=return_edge_contributions,
-        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
-        allow_snapshot_replacement=allow_snapshot_replacement,
-        alpha_source_mode=alpha_source_mode,
-        parent_state=parent_state,
-        child_state=child_state,
-        transition_schedule=transition_schedule,
-        transition_midpoint=transition_midpoint,
-        transition_steepness=transition_steepness,
-        profile_gene_policy=profile_gene_policy,
-    )
-
-
-def simulate_bifurcation(
-    grn: GRN,
-    n_trunk_cells: int = 50,
-    n_branch_cells: int | Mapping[str, int] = 60,
-    trunk_time: float = 2.0,
-    branch_time: float = 2.0,
-    dt: float = 0.01,
-    beta: object | None = None,
-    gamma: object | None = None,
-    u0: object | None = None,
-    s0: object | None = None,
-    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
-    production_profile: StateProductionProfile | None = None,
-    master_programs: Mapping[str, AlphaProgram | float] | None = None,
-    branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
-    default_master_alpha: float = 0.5,
-    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
-    alpha_max: float | None = None,
-    seed: int = 0,
-    noise_seed: int | None = None,
-    capture_rate: float | None = None,
-    poisson_observed: bool = True,
-    dropout_rate: float = 0.0,
-    capture_model: str | None = None,
-    regulator_activity: str = "spliced",
-    auto_calibrate_half_response: bool | str = False,
-    grn_calibration: Mapping[str, object] | None = None,
-    return_edge_contributions: bool = False,
-    allow_profile_targets_as_masters: bool = False,
-    include_branch_initial_state: bool = False,
-    allow_snapshot_replacement: bool = False,
-    alpha_source_mode: str | None = None,
-    trunk_state: str | None = None,
-    branch_child_states: Mapping[str, str] | tuple[str, str] | list[str] | None = None,
-    transition_schedule: str = "sigmoid",
-    transition_midpoint: float = 0.5,
-    transition_steepness: float = 10.0,
-    profile_gene_policy: str = "exact",
-) -> dict:
-    """Backward-compatible bifurcation wrapper around the unified simulate() entry."""
-
-    return simulate(
-        grn,
-        simulator="bifurcation",
-        n_trunk_cells=n_trunk_cells,
-        n_branch_cells=n_branch_cells,
-        trunk_time=trunk_time,
-        branch_time=branch_time,
-        dt=dt,
-        beta=beta,
-        gamma=gamma,
-        u0=u0,
-        s0=s0,
-        master_regulators=master_regulators,
-        production_profile=production_profile,
-        master_programs=master_programs,
-        branch_master_programs=branch_master_programs,
-        default_master_alpha=default_master_alpha,
-        target_leak_alpha=target_leak_alpha,
-        alpha_max=alpha_max,
-        seed=seed,
-        noise_seed=noise_seed,
-        capture_rate=capture_rate,
-        poisson_observed=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=capture_model,
-        regulator_activity=regulator_activity,
-        auto_calibrate_half_response=auto_calibrate_half_response,
-        grn_calibration=grn_calibration,
-        return_edge_contributions=return_edge_contributions,
-        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
-        include_branch_initial_state=include_branch_initial_state,
-        allow_snapshot_replacement=allow_snapshot_replacement,
-        alpha_source_mode=alpha_source_mode,
-        trunk_state=trunk_state,
-        branch_child_states=branch_child_states,
-        transition_schedule=transition_schedule,
-        transition_midpoint=transition_midpoint,
-        transition_steepness=transition_steepness,
-        profile_gene_policy=profile_gene_policy,
-    )
-
-
-def simulate_bifurcation_legacy(
-    grn: GRN,
-    n_trunk_cells: int = 50,
-    n_branch_cells: int | Mapping[str, int] = 60,
-    trunk_time: float = 2.0,
-    branch_time: float = 2.0,
-    dt: float = 0.01,
-    beta: object | None = None,
-    gamma: object | None = None,
-    u0: object | None = None,
-    s0: object | None = None,
-    master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
-    production_profile: StateProductionProfile | None = None,
-    trunk_production_state: str | None = None,
-    branch_production_states: Mapping[str, str] | None = None,
-    interpolate_production: bool = False,
-    master_programs: Mapping[str, AlphaProgram | float] | None = None,
-    branch_master_programs: Mapping[str, Mapping[str, AlphaProgram | float]] | None = None,
-    default_master_alpha: float = 0.5,
-    target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
-    alpha_max: float | None = None,
-    seed: int = 0,
-    noise_seed: int | None = None,
-    capture_rate: float | None = None,
-    poisson_observed: bool = True,
-    dropout_rate: float = 0.0,
-    capture_model: str | None = None,
-    regulator_activity: str = "spliced",
-    auto_calibrate_half_response: bool | str = False,
-    grn_calibration: Mapping[str, object] | None = None,
-    return_edge_contributions: bool = False,
-    allow_profile_targets_as_masters: bool = False,
-    include_branch_initial_state: bool = False,
-    allow_snapshot_replacement: bool = False,
-    profile_gene_policy: str = "exact",
-) -> dict:
-    """Backward-compatible wrapper for the pre-state-anchor bifurcation API."""
-
-    warnings.warn(
-        "simulate_bifurcation_legacy() is deprecated; use simulate_bifurcation() with "
-        "trunk_state, branch_child_states, and transition_schedule instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    _warn_legacy_bifurcation_state_args(
-        trunk_production_state=trunk_production_state,
-        branch_production_states=branch_production_states,
-        interpolate_production=interpolate_production,
-    )
-    transition_schedule = "linear" if interpolate_production else "step"
-    return simulate_bifurcation(
-        grn,
-        n_trunk_cells=n_trunk_cells,
-        n_branch_cells=n_branch_cells,
-        trunk_time=trunk_time,
-        branch_time=branch_time,
-        dt=dt,
-        beta=beta,
-        gamma=gamma,
-        u0=u0,
-        s0=s0,
-        master_regulators=master_regulators,
-        production_profile=production_profile,
-        master_programs=master_programs,
-        branch_master_programs=branch_master_programs,
-        default_master_alpha=default_master_alpha,
-        target_leak_alpha=target_leak_alpha,
-        alpha_max=alpha_max,
-        seed=seed,
-        noise_seed=noise_seed,
-        capture_rate=capture_rate,
-        poisson_observed=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=capture_model,
-        regulator_activity=regulator_activity,
-        auto_calibrate_half_response=auto_calibrate_half_response,
-        grn_calibration=grn_calibration,
-        return_edge_contributions=return_edge_contributions,
-        allow_profile_targets_as_masters=allow_profile_targets_as_masters,
-        include_branch_initial_state=include_branch_initial_state,
-        allow_snapshot_replacement=allow_snapshot_replacement,
-        alpha_source_mode="state_anchor",
-        trunk_state=trunk_production_state,
-        branch_child_states=branch_production_states,
-        transition_schedule=transition_schedule,
-        profile_gene_policy=profile_gene_policy,
+        graph=resolved_mode["graph"],
+        initialization_policy=str(resolved_mode["initialization_policy"]),
+        sampling_policy=str(resolved_mode["sampling_policy"]),
+        simulation_mode=resolved_mode["simulation_mode"],
+        **patched_kwargs,
     )

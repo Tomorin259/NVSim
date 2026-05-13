@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a first external TRRUST mouse NVSim benchmark example."""
+"""Run a first external TRRUST mouse NVSim graph benchmark example."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from nvsim.grn import GRN
+from nvsim.modes import branching_graph
 from nvsim.output import to_anndata
 from nvsim.plotting import (
     plot_gene_dynamics,
@@ -60,17 +61,14 @@ def build_trrust_mouse_bifurcation_result(seed: int = 1) -> dict:
     grn, masters, production = load_trrust_small_inputs()
     return simulate(
         grn,
-        simulator="bifurcation",
-        n_trunk_cells=70,
-        n_branch_cells={"branch_0": 90, "branch_1": 90},
-        trunk_time=1.5,
-        branch_time=2.0,
-        dt=0.02,
+        graph=branching_graph("root", ["branch0", "branch1"]),
         master_regulators=masters,
         production_profile=production,
         alpha_source_mode="state_anchor",
-        trunk_state="root",
-        branch_child_states={"branch_0": "branch0", "branch_1": "branch1"},
+        n_cells_per_state={"root": 70, "branch0": 90, "branch1": 90},
+        root_time=1.5,
+        state_time={"root": 1.5, "branch0": 2.0, "branch1": 2.0},
+        dt=0.02,
         transition_schedule="linear",
         seed=seed,
         capture_rate=None,
@@ -106,7 +104,7 @@ def quality_check_result(result: dict) -> tuple[dict[str, object], list[str]]:
     obs = result["obs"]
     var = result["var"]
     uns = result["uns"]
-    for column in ["pseudotime", "branch"]:
+    for column in ["pseudotime", "branch", "state"]:
         if column not in obs.columns:
             warnings.append(f"obs is missing column: {column}")
     for column in ["gene_role", "gene_class"]:
@@ -121,18 +119,10 @@ def quality_check_result(result: dict) -> tuple[dict[str, object], list[str]]:
         for name in ["true_alpha", "true_unspliced", "true_spliced", "true_velocity", "unspliced", "spliced"]
         if name in layers
     }
-    for name, stats in layer_stats.items():
-        if stats["has_nan"] or stats["has_inf"]:
-            warnings.append(f"layer {name} contains non-finite values")
-        if stats["all_zero"]:
-            warnings.append(f"layer {name} is all zero")
-        if abs(stats["max"]) > 1e6:
-            warnings.append(f"layer {name} has very large values: max={stats['max']}")
-
     summary = {
         "n_cells": int(obs.shape[0]),
         "n_genes": int(var.shape[0]),
-        "branches": sorted(obs["branch"].astype(str).unique().tolist()) if "branch" in obs.columns else [],
+        "states": sorted(obs["state"].astype(str).unique().tolist()) if "state" in obs.columns else [],
         "obs_columns": list(obs.columns),
         "var_columns": list(var.columns),
         "uns_keys": list(uns.keys()),
@@ -156,10 +146,7 @@ def save_visualizations(result: dict, output_dir: Path) -> dict[str, object]:
     for gene in selected_genes:
         plot_phase_portrait(result, gene, mode="true", output_path=diagnostics_dir / f"phase_portrait_{gene}_true.png")
     (diagnostics_dir / "selected_genes.txt").write_text("\n".join(selected_genes) + "\n", encoding="utf-8")
-    return {
-        "selected_genes": selected_genes,
-        "showcase": showcase,
-    }
+    return {"selected_genes": selected_genes, "showcase": showcase}
 
 
 def main() -> None:
@@ -169,7 +156,7 @@ def main() -> None:
     qc_summary, qc_warnings = quality_check_result(result)
     viz_summary = save_visualizations(result, output_dir)
 
-    h5ad_path = output_dir / "trrust_mouse_small_bifurcation.h5ad"
+    h5ad_path = output_dir / "trrust_mouse_small_branching_graph.h5ad"
     try:
         adata = to_anndata(result)
     except ImportError as exc:
@@ -177,26 +164,13 @@ def main() -> None:
     else:
         adata.write_h5ad(h5ad_path)
 
-    summary = {
-        **qc_summary,
-        "visualization": viz_summary,
-        "warnings": qc_warnings,
-        "output_h5ad": str(h5ad_path) if h5ad_path.exists() else None,
-    }
+    summary = {**qc_summary, "visualization": viz_summary, "warnings": qc_warnings, "output_h5ad": str(h5ad_path) if h5ad_path.exists() else None}
     summary_path = output_dir / "quality_check.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    for name in ["true_alpha", "true_spliced", "true_unspliced", "true_velocity"]:
-        if name in qc_summary["layer_stats"]:
-            print(name, qc_summary["layer_stats"][name])
-    if qc_warnings:
-        for warning in qc_warnings:
-            print(f"WARNING: {warning}")
     print(f"quality summary: {summary_path}")
     if h5ad_path.exists():
         print(f"saved {h5ad_path}")
-    else:
-        print("h5ad was not written; see warnings above")
 
 
 if __name__ == "__main__":

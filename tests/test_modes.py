@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from nvsim.grn import GRN
-from nvsim.modes import DifferentiationGraph
+from nvsim.modes import StateGraph, branching_graph, path_graph
 from nvsim.production import StateProductionProfile
 from nvsim.simulate import simulate
 
@@ -34,22 +34,15 @@ def _mode_profile() -> StateProductionProfile:
     )
 
 
-def _mode_graph() -> DifferentiationGraph:
-    return DifferentiationGraph(
-        pd.DataFrame(
-            {
-                "parent_state": ["root", "root"],
-                "child_state": ["branch_a", "branch_b"],
-            }
-        )
-    )
+def _mode_graph() -> StateGraph:
+    return branching_graph("root", ["branch_a", "branch_b"])
 
 
 def test_sergio_differentiation_mode_resolves_expected_defaults():
     result = simulate(
         _mode_grn(),
         simulation_mode="sergio_differentiation",
-        differentiation_graph=_mode_graph(),
+        graph=_mode_graph(),
         production_profile=_mode_profile(),
         n_cells_per_state=5,
         root_time=0.5,
@@ -61,10 +54,10 @@ def test_sergio_differentiation_mode_resolves_expected_defaults():
     config = result["uns"]["simulation_config"]
 
     assert config["simulation_mode"] == "sergio_differentiation"
-    assert config["simulator"] == "differentiation_graph"
+    assert config["simulator"] == "graph"
     assert config["alpha_source_mode"] == "state_anchor"
-    assert config["initialization_policy"] == "state_anchor_steady_state"
-    assert config["sampling_policy"] == "sergio_transient"
+    assert config["initialization_policy"] == "parent_steady_state"
+    assert config["sampling_policy"] == "state_transient"
     assert config["transition_schedule"] == "step"
     assert config["regulator_activity"] == "unspliced"
     assert set(result["obs"]["state"].unique()) == {"root", "branch_a", "branch_b"}
@@ -75,7 +68,7 @@ def test_sergio_differentiation_children_start_from_parent_steady_state_by_defau
     result = simulate(
         _mode_grn(),
         simulation_mode="sergio_differentiation",
-        differentiation_graph=_mode_graph(),
+        graph=_mode_graph(),
         production_profile=_mode_profile(),
         n_cells_per_state=4,
         root_time=0.5,
@@ -92,20 +85,14 @@ def test_sergio_differentiation_children_start_from_parent_steady_state_by_defau
     assert np.allclose(init["u0"], steady)
 
 
-def test_sergio_differentiation_mode_rejects_incompatible_simulator_override():
-    with pytest.raises(ValueError, match="incompatible with simulator"):
-        simulate(
-            _mode_grn(),
-            simulator="linear",
-            simulation_mode="sergio_differentiation",
-            differentiation_graph=_mode_graph(),
-            production_profile=_mode_profile(),
-        )
+def test_simulator_rejects_removed_special_cases():
+    with pytest.raises(ValueError, match="simulator must be"):
+        simulate(_mode_grn(), simulator="linear", graph=_mode_graph(), production_profile=_mode_profile())
 
 
-def test_differentiation_graph_rejects_cycles():
+def test_state_graph_rejects_cycles():
     with pytest.raises(ValueError, match="acyclic"):
-        DifferentiationGraph(
+        StateGraph(
             pd.DataFrame(
                 {
                     "parent_state": ["a", "b"],
@@ -115,9 +102,9 @@ def test_differentiation_graph_rejects_cycles():
         )
 
 
-def test_differentiation_graph_rejects_multiple_parents():
+def test_state_graph_rejects_multiple_parents():
     with pytest.raises(ValueError, match="at most one parent"):
-        DifferentiationGraph(
+        StateGraph(
             pd.DataFrame(
                 {
                     "parent_state": ["root_0", "root_1"],
@@ -125,3 +112,9 @@ def test_differentiation_graph_rejects_multiple_parents():
                 }
             )
         )
+
+
+def test_path_graph_helper_builds_chain_order():
+    graph = path_graph(["s0", "s1", "s2"])
+    assert graph.topological_order() == ("s0", "s1", "s2")
+    assert graph.parent_of("s2") == "s1"

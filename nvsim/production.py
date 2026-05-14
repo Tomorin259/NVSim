@@ -48,7 +48,9 @@ def transition_weight(
         raise ValueError("transition_steepness must be positive")
     x = float(np.clip(fraction, 0.0, 1.0))
     if schedule == "step":
-        return 0.0 if x < midpoint else 1.0
+        # Step transitions switch to the child anchor at the segment boundary.
+        # Unlike linear/sigmoid schedules, there is no in-segment interpolation.
+        return 1.0
     if schedule == "linear":
         return x
 

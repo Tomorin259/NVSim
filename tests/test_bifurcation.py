@@ -135,6 +135,23 @@ def test_branching_capture_model_metadata_is_recorded():
     assert result["uns"]["simulation_config"]["capture_model"] == "binomial_capture"
 
 
+def test_sergio_differentiation_defaults_to_sergio_kinetics():
+    result = simulate(
+        _graph_grn(),
+        **_branching_kwargs(),
+        simulation_mode="sergio_differentiation",
+    )
+    beta = result["uns"]["kinetic_params"]["beta"].to_numpy()
+    gamma = result["uns"]["kinetic_params"]["gamma"].to_numpy()
+
+    assert result["uns"]["simulation_config"]["kinetics_mode"] == "sergio"
+    assert result["uns"]["kinetic_params"]["kinetics_mode"] == "sergio"
+    assert result["uns"]["kinetic_params"]["sergio_decay"] == pytest.approx(0.8)
+    assert result["uns"]["kinetic_params"]["sergio_splice_ratio"] == pytest.approx(4.0)
+    assert np.allclose(beta, 0.8)
+    assert np.allclose(gamma, 0.2)
+
+
 def test_branching_sampling_without_replacement_is_default():
     with pytest.raises(ValueError, match="n_cells exceeds available timepoints"):
         simulate(

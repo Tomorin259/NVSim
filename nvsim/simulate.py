@@ -35,6 +35,9 @@ from .regulation import compute_alpha
 SIMULATION_MODES = {"sergio_differentiation"}
 INITIALIZATION_POLICIES = {"parent_steady_state", "parent_terminal"}
 SAMPLING_POLICIES = {"state_transient"}
+KINETICS_MODES = {"default", "sergio"}
+SERGIO_DECAY = 0.8
+SERGIO_SPLICE_RATIO = 4.0
 
 
 def _gene_index(genes: list[str] | tuple[str, ...]) -> pd.Index:
@@ -71,14 +74,32 @@ def create_kinetic_vectors(
     genes: list[str] | tuple[str, ...],
     beta: object | None = None,
     gamma: object | None = None,
+    kinetics_mode: str = "default",
     beta_range: tuple[float, float] = (0.4, 1.2),
     gamma_range: tuple[float, float] = (0.2, 0.8),
     seed: int | None = 0,
-) -> tuple[pd.Series, pd.Series]:
+) -> tuple[pd.Series, pd.Series, dict[str, object]]:
     """Generate or validate gene-specific beta/gamma vectors."""
 
     index = _gene_index(genes)
     rng = np.random.default_rng(seed)
+    if kinetics_mode not in KINETICS_MODES:
+        raise ValueError(f"kinetics_mode must be one of {sorted(KINETICS_MODES)}")
+
+    if kinetics_mode == "sergio":
+        if beta is not None or gamma is not None:
+            raise ValueError("kinetics_mode='sergio' is incompatible with explicit beta/gamma")
+        beta_series = pd.Series(np.repeat(SERGIO_DECAY, len(index)), index=index, name="beta")
+        gamma_series = pd.Series(
+            np.repeat(SERGIO_DECAY / SERGIO_SPLICE_RATIO, len(index)),
+            index=index,
+            name="gamma",
+        )
+        return beta_series, gamma_series, {
+            "kinetics_mode": "sergio",
+            "sergio_decay": float(SERGIO_DECAY),
+            "sergio_splice_ratio": float(SERGIO_SPLICE_RATIO),
+        }
 
     if beta is None:
         lo, hi = beta_range
@@ -96,7 +117,7 @@ def create_kinetic_vectors(
     else:
         gamma_series = validate_positive_vector(gamma, tuple(index), "gamma")
 
-    return beta_series, gamma_series
+    return beta_series, gamma_series, {"kinetics_mode": "default"}
 
 
 def initialize_state(
@@ -754,6 +775,7 @@ def _resolve_mode_defaults(
     transition_schedule: str | None,
     regulator_activity: str | None,
     half_response_calibration: str | None,
+    kinetics_mode: str | None,
 ) -> dict[str, object]:
     resolved_graph = coerce_graph(graph)
     resolved_mode = None if simulation_mode is None else str(simulation_mode).strip().lower()
@@ -767,6 +789,7 @@ def _resolve_mode_defaults(
     resolved_transition_schedule = transition_schedule
     resolved_regulator_activity = regulator_activity
     resolved_half_response_calibration = half_response_calibration
+    resolved_kinetics_mode = kinetics_mode
 
     if resolved_mode == "sergio_differentiation":
         if production_profile is None:
@@ -792,6 +815,8 @@ def _resolve_mode_defaults(
             resolved_regulator_activity = "unspliced"
         if resolved_half_response_calibration is None:
             resolved_half_response_calibration = "auto"
+        if resolved_kinetics_mode is None:
+            resolved_kinetics_mode = "sergio"
 
     if resolved_graph is None:
         raise ValueError("graph must be provided; graph is now the only supported simulator topology")
@@ -809,6 +834,10 @@ def _resolve_mode_defaults(
         resolved_regulator_activity = "spliced"
     if resolved_half_response_calibration is None:
         resolved_half_response_calibration = "off"
+    if resolved_kinetics_mode is None:
+        resolved_kinetics_mode = "default"
+    if resolved_kinetics_mode not in KINETICS_MODES:
+        raise ValueError(f"kinetics_mode must be one of {sorted(KINETICS_MODES)}")
 
     if resolved_initialization_policy not in INITIALIZATION_POLICIES:
         raise ValueError(f"initialization_policy must be one of {sorted(INITIALIZATION_POLICIES)}")
@@ -825,6 +854,7 @@ def _resolve_mode_defaults(
         "transition_schedule": resolved_transition_schedule,
         "regulator_activity": resolved_regulator_activity,
         "half_response_calibration": resolved_half_response_calibration,
+        "kinetics_mode": resolved_kinetics_mode,
     }
 
 def _steady_state_table_from_source_rates(
@@ -907,6 +937,7 @@ def _prepare_common_inputs(
     grn: GRN,
     beta: object | None,
     gamma: object | None,
+    kinetics_mode: str,
     u0: object | None,
     s0: object | None,
     master_programs: Mapping[str, AlphaProgram | float] | None,
@@ -916,11 +947,18 @@ def _prepare_common_inputs(
     if default_master_alpha < 0:
         raise ValueError("default_master_alpha must be non-negative")
     genes = grn.genes
-    beta_series, gamma_series = create_kinetic_vectors(genes, beta=beta, gamma=gamma, seed=seed)
+    beta_series, gamma_series, kinetics_metadata = create_kinetic_vectors(
+        genes,
+        beta=beta,
+        gamma=gamma,
+        kinetics_mode=kinetics_mode,
+        seed=seed,
+    )
     u0_series, s0_series = initialize_state(genes, u0=u0, s0=s0)
     return (
         beta_series,
         gamma_series,
+        kinetics_metadata,
         u0_series,
         s0_series,
         beta_series.to_numpy(dtype=float),
@@ -1042,6 +1080,7 @@ def _simulate_graph_impl(
     dt: float = 0.01,
     beta: object | None = None,
     gamma: object | None = None,
+    kinetics_mode: str = "default",
     u0: object | None = None,
     s0: object | None = None,
     master_regulators: list[str] | tuple[str, ...] | pd.Index | None = None,
@@ -1083,6 +1122,7 @@ def _simulate_graph_impl(
     (
         beta_series,
         gamma_series,
+        kinetics_metadata,
         _u0_series,
         _s0_series,
         beta_arr,
@@ -1090,7 +1130,17 @@ def _simulate_graph_impl(
         u0_arr,
         s0_arr,
         programs,
-    ) = _prepare_common_inputs(grn, beta, gamma, u0, s0, master_programs, default_master_alpha, seed)
+    ) = _prepare_common_inputs(
+        grn,
+        beta,
+        gamma,
+        kinetics_mode,
+        u0,
+        s0,
+        master_programs,
+        default_master_alpha,
+        seed,
+    )
     master_genes, master_metadata = _resolve_master_genes(
         grn,
         master_regulators=master_regulators,
@@ -1349,6 +1399,7 @@ def _simulate_graph_impl(
         "integrator": "rk4",
         "alpha_max": alpha_max,
         "default_master_alpha": default_master_alpha,
+        "kinetics_mode": kinetics_metadata["kinetics_mode"],
         "explicit_master_regulators": list(master_genes),
         "resolved_master_regulator_source": master_metadata["resolved_master_regulator_source"],
         "incoming_edges_to_masters_count": master_metadata["incoming_edges_to_masters_count"],
@@ -1414,6 +1465,10 @@ def _simulate_graph_impl(
         edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
     )
     result["uns"]["segment_time_courses"] = state_segments
+    result["uns"]["kinetic_params"]["kinetics_mode"] = kinetics_metadata["kinetics_mode"]
+    if kinetics_metadata["kinetics_mode"] == "sergio":
+        result["uns"]["kinetic_params"]["sergio_decay"] = kinetics_metadata["sergio_decay"]
+        result["uns"]["kinetic_params"]["sergio_splice_ratio"] = kinetics_metadata["sergio_splice_ratio"]
     result["uns"]["graph"] = {
         "states": list(states),
         "root_states": list(root_states),
@@ -1453,12 +1508,14 @@ def simulate(
         transition_schedule=kwargs.get("transition_schedule"),
         regulator_activity=kwargs.get("regulator_activity"),
         half_response_calibration=kwargs.get("half_response_calibration"),
+        kinetics_mode=kwargs.get("kinetics_mode"),
     )
     patched_kwargs = dict(kwargs)
     patched_kwargs["alpha_source_mode"] = resolved_mode["alpha_source_mode"]
     patched_kwargs["regulator_activity"] = resolved_mode["regulator_activity"]
     patched_kwargs["half_response_calibration"] = resolved_mode["half_response_calibration"]
     patched_kwargs["transition_schedule"] = resolved_mode["transition_schedule"]
+    patched_kwargs["kinetics_mode"] = resolved_mode["kinetics_mode"]
     return _simulate_graph_impl(
         grn,
         graph=resolved_mode["graph"],

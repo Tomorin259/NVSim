@@ -171,3 +171,9 @@ def test_removed_random_small_behavior_is_gone_for_roots():
     result = simulate(grn, **_chain_kwargs())
     root_init = result["uns"]["state_initialization"]["early"]
     assert root_init["source"] == "state_steady_state"
+
+
+def test_sergio_kinetics_mode_rejects_explicit_beta_gamma():
+    grn = _small_grn()
+    with pytest.raises(ValueError, match="kinetics_mode='sergio'"):
+        simulate(grn, **_chain_kwargs(), kinetics_mode="sergio", beta=np.full(4, 0.8))

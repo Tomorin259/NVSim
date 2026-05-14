@@ -46,7 +46,8 @@ def test_state_production_profile_interpolated_warns_and_matches_linear_transiti
 def test_state_production_profile_transition_schedules():
     profile = _profile()
 
-    assert transition_weight(0.25, schedule="step", midpoint=0.5) == 0.0
+    assert transition_weight(0.0, schedule="step", midpoint=0.5) == 1.0
+    assert transition_weight(0.25, schedule="step", midpoint=0.5) == 1.0
     assert transition_weight(0.75, schedule="step", midpoint=0.5) == 1.0
     assert transition_weight(0.25, schedule="linear") == 0.25
 

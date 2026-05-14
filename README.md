@@ -214,6 +214,7 @@ python examples/run_linear_continuous_program.py
 python examples/run_bifurcation_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
+python examples/run_sergio_ds6_dynamic_graph.py
 ```
 
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
@@ -433,6 +434,7 @@ python examples/run_linear_continuous_program.py
 python examples/run_bifurcation_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
+python examples/run_sergio_ds6_dynamic_graph.py
 ```
 
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。

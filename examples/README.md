@@ -30,6 +30,7 @@ These are the supported example workflows.
 - `run_mvp_bifurcation.py`: compact branching-graph smoke example with
   continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
+- `run_sergio_ds6_dynamic_graph.py`: SERGIO-style `simulation_mode="sergio_differentiation"` re-run of the DS6 dynamic dataset.
 
 ### Plotting
 
@@ -50,6 +51,7 @@ python examples/run_linear_continuous_program.py
 python examples/run_bifurcation_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
+python examples/run_sergio_ds6_dynamic_graph.py
 ```
 
 ## Output Naming
@@ -67,3 +69,4 @@ Current generated output groups are:
 - `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
   showcase plots.
 - `examples/outputs/trrust_mouse_small/`: external TRRUST benchmark outputs.
+- `examples/outputs/sergio_100g_ds6_sergio_differentiation_20260514/`: current SERGIO-style DS6 dynamic benchmark re-run, including H5AD, CSV/NPZ exports, phase gallery, and velocity showcase plots.

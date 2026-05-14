@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from nvsim.grn import GRN
-from nvsim.modes import branching_graph, path_graph
+from nvsim.modes import StateGraph, branching_graph, path_graph
 from nvsim.output import to_anndata
 from nvsim.production import StateProductionProfile, linear_increase, sigmoid_decrease
 from nvsim.simulate import simulate
@@ -53,6 +53,23 @@ def linear_graph():
 
 def branching_tutorial_graph():
     return branching_graph("root", ["branch_A", "branch_B"])
+
+
+def custom_dag_tutorial_graph() -> StateGraph:
+    """General DAG-graph example for the canonical graph-based API.
+
+    Path and branching helpers are convenience wrappers. Arbitrary rooted DAGs
+    still use the same `simulate(..., graph=...)` entry point. See
+    `examples/run_sergio_ds6_dynamic_graph.py` for a larger real dataset.
+    """
+
+    edges = pd.DataFrame(
+        {
+            "parent_state": ["root", "mid", "mid"],
+            "child_state": ["mid", "leaf_A", "leaf_B"],
+        }
+    )
+    return StateGraph(edges, states=("root", "mid", "leaf_A", "leaf_B"))
 
 
 def linear_parameters() -> dict[str, object]:

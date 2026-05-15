@@ -193,8 +193,6 @@ Main noise parameters:
 - `dropout_rate`
 - `noise_seed`
 
-Legacy aliases such as `scale_poisson` and `binomial` are compatibility-only names and should not be used in new code.
-
 #### 5. Inspect Result
 
 Simulation returns a plain dict with these main sections:
@@ -221,18 +219,7 @@ See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
 
 ### Migration Notes
 
-The public API now uses canonical names consistently:
-
-- `capture_model` replaces `noise_model`
-- `poisson_capture` replaces legacy `scale_poisson`
-- `binomial_capture` replaces legacy `binomial`
-- `trunk_state` replaces `trunk_production_state`
-- `branch_child_states` replaces `branch_production_states`
-- `transition_schedule="linear"` replaces `interpolate_production=True`
-- `K` replaces legacy `weight`
-- `half_response` replaces legacy `threshold`
-
-The old `linear` / `bifurcation` simulator special cases and their wrapper APIs have been removed. New code should always call `simulate(..., graph=...)` and express topology through `StateGraph`, `path_graph(...)`, or `branching_graph(...)`.
+Topology is graph-only. New code should always call `simulate(..., graph=...)` and express topology through `StateGraph`, `path_graph(...)`, or `branching_graph(...)`.
 
 ### Documentation
 
@@ -264,7 +251,7 @@ GRN -> alpha(t) -> unspliced/spliced ODE -> true velocity -> snapshot cells -> o
 - 两种 master-regulator alpha source mode：`continuous_program` 保留 NVSim 原有连续时间程序，`state_anchor` 使用 SERGIO 风格 state/bin production anchor。
 - 面向 unspliced / spliced RNA 的确定性 RNA velocity ODE。
 - true layer 与 observed layer 分离。
-- linear 和 trunk-to-two-branch bifurcation 两类模拟。
+- path-like 和 branching rooted DAG 两类常见拓扑模板。
 - 可选的 AnnData 导出和轻量可视化工具。
 
 ### 当前不做的内容
@@ -413,8 +400,6 @@ result = simulate(
 - `dropout_rate`
 - `noise_seed`
 
-`scale_poisson` 和 `binomial` 这些旧名字只保留兼容意义，新代码不建议再使用。
-
 #### 5. Inspect Result
 
 模拟结果是一个 plain dict，重点看四块：
@@ -441,18 +426,7 @@ python examples/run_sergio_ds6_dynamic_graph_stepfix.py
 
 ### 迁移说明
 
-当前公开 API 已统一使用 canonical 命名：
-
-- `capture_model` 替代 `noise_model`
-- `poisson_capture` 替代旧的 `scale_poisson`
-- `binomial_capture` 替代旧的 `binomial`
-- `trunk_state` 替代 `trunk_production_state`
-- `branch_child_states` 替代 `branch_production_states`
-- `transition_schedule="linear"` 替代 `interpolate_production=True`
-- `K` 替代旧的 `weight`
-- `half_response` 替代旧的 `threshold`
-
-旧的 `linear` / `bifurcation` simulator 特例和对应 wrapper 已全部移除。新的调用方式统一为 `simulate(..., graph=...)`，拓扑通过 `StateGraph`、`path_graph(...)` 或 `branching_graph(...)` 表达。
+当前拓扑层只保留 graph。新的调用方式统一为 `simulate(..., graph=...)`，拓扑通过 `StateGraph`、`path_graph(...)` 或 `branching_graph(...)` 表达。
 
 ### 相关文档
 

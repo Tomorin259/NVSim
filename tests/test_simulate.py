@@ -147,13 +147,6 @@ def test_explicit_initial_state_is_recorded_for_roots():
     assert result["uns"]["state_initialization"]["early"]["source"] == "explicit_initial_state"
 
 
-def test_deprecated_initialization_policy_alias_is_still_accepted():
-    grn = _small_grn()
-    with pytest.warns(DeprecationWarning, match="child_initialization_policy"):
-        result = simulate(grn, **_chain_kwargs(), initialization_policy="parent_terminal")
-    assert result["uns"]["simulation_config"]["child_initialization_policy"] == "parent_terminal"
-
-
 def test_auto_half_response_calibration_works_for_continuous_program():
     grn = _small_grn_missing_half_response()
     result = simulate(grn, **_chain_kwargs(), half_response_calibration="auto")

@@ -714,7 +714,7 @@ def _resolve_mode_defaults(
     graph: StateGraph | pd.DataFrame | dict[str, object] | None,
     production_profile: StateProductionProfile | None,
     alpha_source_mode: str | None,
-    initialization_policy: str | None,
+    child_initialization_policy: str | None,
     sampling_policy: str | None,
     transition_schedule: str | None,
     regulator_activity: str | None,
@@ -728,7 +728,7 @@ def _resolve_mode_defaults(
 
     resolved_simulator = None if simulator is None else str(simulator).strip().lower()
     resolved_alpha_source_mode = alpha_source_mode
-    resolved_initialization_policy = initialization_policy
+    resolved_initialization_policy = child_initialization_policy
     resolved_sampling_policy = sampling_policy
     resolved_transition_schedule = transition_schedule
     resolved_regulator_activity = regulator_activity
@@ -1440,27 +1440,16 @@ def simulate(
     simulation_mode: str | None = None,
     graph: StateGraph | pd.DataFrame | dict[str, object] | None = None,
     child_initialization_policy: str | None = None,
-    initialization_policy: str | None = None,
     sampling_policy: str | None = None,
     **kwargs: object,
 ) -> dict:
-    if child_initialization_policy is not None and initialization_policy is not None:
-        raise ValueError("Specify only one of child_initialization_policy and initialization_policy")
-    if child_initialization_policy is None and initialization_policy is not None:
-        warnings.warn(
-            "initialization_policy is deprecated; use child_initialization_policy instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        child_initialization_policy = initialization_policy
-
     resolved_mode = _resolve_mode_defaults(
         simulator=simulator,
         simulation_mode=simulation_mode,
         graph=graph,
         production_profile=kwargs.get("production_profile"),
         alpha_source_mode=kwargs.get("alpha_source_mode"),
-        initialization_policy=child_initialization_policy,
+        child_initialization_policy=child_initialization_policy,
         sampling_policy=sampling_policy,
         transition_schedule=kwargs.get("transition_schedule"),
         regulator_activity=kwargs.get("regulator_activity"),

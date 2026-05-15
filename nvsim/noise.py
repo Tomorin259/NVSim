@@ -1,36 +1,14 @@
-"""从 true layers 生成 observed layers 的轻量噪声模型。
-
-本模块只生成观测层，不会修改 true_unspliced/true_spliced。
-对外推荐只使用两个 canonical capture model：
-
-- ``poisson_capture``: 先做 capture scaling，再可选 Poisson 采样
-- ``binomial_capture``: VeloSim-style molecule capture,
-  ``Obs ~ Binomial(round(True), capture_rate)``
-
-兼容旧脚本时，仍接受 legacy alias：
-
-- ``scale_poisson`` -> ``poisson_capture``
-- ``binomial`` -> ``binomial_capture``
-"""
+"""Observed-count generation for lightweight capture-noise models."""
 
 from __future__ import annotations
 
 import numpy as np
-import warnings
 
 CANONICAL_CAPTURE_MODELS = ("poisson_capture", "binomial_capture")
-LEGACY_CAPTURE_MODEL_ALIASES = {
-    "scale_poisson": "poisson_capture",
-    "binomial": "binomial_capture",
-}
-SUPPORTED_CAPTURE_MODEL_NAMES = (*CANONICAL_CAPTURE_MODELS, *LEGACY_CAPTURE_MODEL_ALIASES.keys())
 
 
 def _valid_capture_model_message() -> str:
-    return (
-        "capture_model must be one of 'poisson_capture' or 'binomial_capture'; "
-        "legacy aliases 'scale_poisson' and 'binomial' are still accepted"
-    )
+    return "capture_model must be one of 'poisson_capture' or 'binomial_capture'"
 
 
 def _resolve_capture_model_name(capture_model: str | None) -> str:
@@ -38,14 +16,6 @@ def _resolve_capture_model_name(capture_model: str | None) -> str:
         return "poisson_capture"
     if capture_model in CANONICAL_CAPTURE_MODELS:
         return capture_model
-    if capture_model in LEGACY_CAPTURE_MODEL_ALIASES:
-        warnings.warn(
-            f"capture_model={capture_model!r} is a legacy alias; "
-            f"use {LEGACY_CAPTURE_MODEL_ALIASES[capture_model]!r} instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return LEGACY_CAPTURE_MODEL_ALIASES[capture_model]
     raise ValueError(_valid_capture_model_message())
 
 
@@ -58,25 +28,21 @@ def generate_observed_counts(
     dropout_rate: float = 0.0,
     capture_model: str | None = None,
 ) -> dict[str, np.ndarray]:
-    """根据 true u/s 生成 observed unspliced/spliced。
+    """Generate observed unspliced/spliced layers from true latent layers.
 
-    推荐使用 ``capture_model='poisson_capture'`` 或
-    ``capture_model='binomial_capture'``。旧别名 ``scale_poisson``、
-    ``binomial`` 仍然兼容。
+    Supported capture models:
 
-    ``capture_model='poisson_capture'`` 时，
-    处理顺序是：
-    可选 capture scaling -> 可选 Poisson 采样 -> 可选 dropout。
+    - ``poisson_capture``: optional capture scaling, then optional Poisson sampling
+    - ``binomial_capture``: round latent molecule counts, then apply binomial capture
 
-    ``capture_model='binomial_capture'`` 时，处理顺序是：
-    round(true counts) -> Binomial capture -> 可选 dropout。
+    For ``binomial_capture``, the implementation uses
+    ``np.rint(true_counts).astype(int)`` as the latent molecule count before
+    molecule-level capture. The binomial branch does not apply an additional
+    Poisson sampling step.
 
-    对 binomial capture，当前使用 ``np.rint(true_counts).astype(int)`` 作为
-    latent molecule count，然后做按分子捕获。默认不再对 binomial 结果重复
-    Poisson 采样，因为 binomial capture 本身已经是离散观测步骤。
-
-    如果 ``poisson=False``，observed layer 会保留连续值，适合低噪声可视化
-    或调试；它不是现实 UMI count 模型。
+    If ``poisson=False`` under ``poisson_capture``, the returned observed layers
+    keep continuous values. This is useful for low-noise visualization and
+    debugging, not as a realistic UMI count model.
     """
 
     rng = np.random.default_rng(seed)

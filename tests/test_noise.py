@@ -70,38 +70,6 @@ def test_capture_model_binomial_capture_alias_also_works():
     assert np.all(observed["spliced"] >= 0.0)
 
 
-def test_capture_model_scale_poisson_legacy_alias_also_works():
-    true_u = np.array([[0.2, 1.7], [2.3, 4.9]], dtype=float)
-    true_s = np.array([[1.2, 0.6], [0.8, 2.1]], dtype=float)
-    with pytest.warns(DeprecationWarning, match="legacy alias"):
-        observed = generate_observed_counts(
-            true_u,
-            true_s,
-            seed=17,
-            capture_rate=0.5,
-            capture_model="scale_poisson",
-            dropout_rate=0.0,
-        )
-    assert observed["unspliced"].shape == true_u.shape
-    assert observed["spliced"].shape == true_s.shape
-
-
-def test_capture_model_binomial_legacy_alias_also_works():
-    true_u = np.array([[0.2, 1.7], [2.3, 4.9]], dtype=float)
-    true_s = np.array([[1.2, 0.6], [0.8, 2.1]], dtype=float)
-    with pytest.warns(DeprecationWarning, match="legacy alias"):
-        observed = generate_observed_counts(
-            true_u,
-            true_s,
-            seed=17,
-            capture_rate=0.5,
-            capture_model="binomial",
-            dropout_rate=0.0,
-        )
-    assert observed["unspliced"].shape == true_u.shape
-    assert observed["spliced"].shape == true_s.shape
-
-
 def test_binomial_capture_requires_capture_rate():
     true_u = np.array([[1.0]])
     true_s = np.array([[1.0]])

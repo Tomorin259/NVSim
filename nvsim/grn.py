@@ -641,31 +641,6 @@ def calibrate_grn_half_response(
     return calibrated, metadata
 
 
-def calibrate_grn_thresholds(
-    grn: GRN | pd.DataFrame,
-    state_production: pd.DataFrame,
-    *,
-    explicit_master_regulators: Iterable[str] | None = None,
-    method: str = "mean",
-    fallback_half_response: float = 1.0,
-    target_leak_alpha: float | pd.Series | dict[str, float] = 0.0,
-) -> tuple[GRN | pd.DataFrame, dict[str, object]]:
-    """Legacy alias for half-response calibration."""
-
-    warnings.warn(
-        "calibrate_grn_thresholds() is deprecated; use calibrate_grn_half_response() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return calibrate_grn_half_response(
-        grn,
-        state_production,
-        explicit_master_regulators=explicit_master_regulators,
-        method=method,
-        fallback_half_response=fallback_half_response,
-        target_leak_alpha=target_leak_alpha,
-    )
-
 
 @dataclass(frozen=True)
 class GRN:

@@ -193,22 +193,6 @@ class StateProductionProfile:
         alpha.index.name = "gene"
         return alpha.astype(float)
 
-    def source_alpha_interpolated(
-        self,
-        parent_state: str,
-        child_state: str,
-        fraction: float,
-        genes: list[str] | tuple[str, ...] | pd.Index | None = None,
-    ) -> pd.Series:
-        """Legacy linear interpolation helper around source_alpha_transition()."""
-
-        warnings.warn(
-            "source_alpha_interpolated() is deprecated; use source_alpha_transition(..., schedule='linear') instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.source_alpha_transition(parent_state, child_state, fraction, schedule="linear", genes=genes)
-
     def source_alpha_transition(
         self,
         parent_state: str,

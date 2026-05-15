@@ -28,11 +28,3 @@ def test_tutorial_graph_examples_run_with_canonical_api():
     assert linear["layers"]["true_spliced"].shape[0] == sum(tutorial.linear_parameters()["n_cells_per_state"].values())
     assert set(branching["obs"]["state"].unique()) == {"root", "branch_A", "branch_B"}
 
-
-def test_public_api_does_not_export_removed_legacy_interfaces():
-    import nvsim
-
-    assert "simulate_bifurcation_legacy" not in nvsim.__all__
-    assert "simulate_linear" not in nvsim.__all__
-    assert "simulate_bifurcation" not in nvsim.__all__
-    assert "calibrate_grn_thresholds" not in nvsim.__all__

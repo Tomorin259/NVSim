@@ -30,7 +30,6 @@ These are the supported example workflows.
 - `run_mvp_bifurcation.py`: compact branching-graph smoke example with
   continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
-- `run_sergio_ds6_dynamic_graph.py`: compact DS6 graph rerun example.
 - `run_sergio_ds6_dynamic_graph_stepfix.py`: canonical DS6 benchmark rerun with the corrected `step` semantics, official-style scanpy/scVelo outputs, and regulation diagnostics.
 
 ### Plotting

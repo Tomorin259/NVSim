@@ -331,58 +331,6 @@ def _state_transition_source_alpha_fn(
     return resolve
 
 
-def _coerce_branch_state_mapping(
-    branch_states: Mapping[str, str] | tuple[str, str] | list[str],
-    branch_labels: tuple[str, str],
-    *,
-    parameter_name: str,
-) -> dict[str, str]:
-    if isinstance(branch_states, Mapping):
-        missing = [branch for branch in branch_labels if branch not in branch_states]
-        if missing:
-            raise ValueError(f"{parameter_name} missing branches: {missing}")
-        return {branch: str(branch_states[branch]) for branch in branch_labels}
-    if len(branch_states) != len(branch_labels):
-        raise ValueError(f"{parameter_name} must contain exactly two states for branch_0 and branch_1")
-    return {branch: str(state) for branch, state in zip(branch_labels, branch_states)}
-
-
-def _resolve_branch_child_states(
-    branch_child_states: Mapping[str, str] | tuple[str, str] | list[str] | None,
-    branch_labels: tuple[str, str],
-) -> dict[str, str] | None:
-    if branch_child_states is not None:
-        return _coerce_branch_state_mapping(
-            branch_child_states,
-            branch_labels,
-            parameter_name="branch_child_states",
-        )
-    return None
-
-
-def _warn_legacy_bifurcation_state_args(
-    *,
-    trunk_production_state: str | None,
-    branch_production_states: Mapping[str, str] | None,
-    interpolate_production: bool,
-) -> None:
-    legacy_args: list[str] = []
-    if trunk_production_state is not None:
-        legacy_args.append("trunk_production_state")
-    if branch_production_states is not None:
-        legacy_args.append("branch_production_states")
-    if interpolate_production:
-        legacy_args.append("interpolate_production")
-    if legacy_args:
-        warnings.warn(
-            "Legacy bifurcation production-profile arguments "
-            + ", ".join(legacy_args)
-            + " are deprecated; prefer trunk_state + branch_child_states + transition_schedule.",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-
-
 def _alpha_from_state(
     u: np.ndarray,
     s: np.ndarray,
@@ -1412,7 +1360,7 @@ def _simulate_graph_impl(
         "child_initialization_policy": child_initialization_policy,
         "sampling_policy": sampling_policy,
         "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
-        "transition_midpoint": transition_midpoint if resolved_alpha_source_mode == "state_anchor" else None,
+        "transition_midpoint": (transition_midpoint if resolved_alpha_source_mode == "state_anchor" and transition_schedule != "step" else None),
         "transition_steepness": transition_steepness if resolved_alpha_source_mode == "state_anchor" else None,
         "half_response_calibration": half_response_calibration,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),

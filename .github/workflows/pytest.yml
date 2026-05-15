@@ -29,5 +29,5 @@ jobs:
       - name: Run core example smoke tests
         run: |
           python examples/run_mvp_linear.py
-          python examples/run_mvp_bifurcation.py
+          python examples/run_mvp_branching.py
           python examples/plot_velocity_showcase.py

@@ -57,7 +57,7 @@ def load_trrust_small_inputs(data_dir: Path = DATA_DIR) -> tuple[GRN, list[str],
     return grn, masters, production
 
 
-def build_trrust_mouse_bifurcation_result(seed: int = 1) -> dict:
+def build_trrust_mouse_branching_result(seed: int = 1) -> dict:
     grn, masters, production = load_trrust_small_inputs()
     return simulate(
         grn,
@@ -152,7 +152,7 @@ def save_visualizations(result: dict, output_dir: Path) -> dict[str, object]:
 def main() -> None:
     output_dir = OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
-    result = build_trrust_mouse_bifurcation_result(seed=1)
+    result = build_trrust_mouse_branching_result(seed=1)
     qc_summary, qc_warnings = quality_check_result(result)
     viz_summary = save_visualizations(result, output_dir)
 

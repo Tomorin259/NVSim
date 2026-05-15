@@ -16,7 +16,7 @@ def test_tutorial_graph_examples_run_with_canonical_api():
     tutorial = _load_tutorial_module()
 
     linear = tutorial.run_linear_tutorial()
-    branching = tutorial.run_bifurcation_tutorial()
+    branching = tutorial.run_branching_tutorial()
 
     assert linear["uns"]["simulation_config"]["capture_model"] == "poisson_capture"
     assert linear["uns"]["simulation_config"]["alpha_source_mode"] == "continuous_program"

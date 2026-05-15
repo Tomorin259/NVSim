@@ -24,10 +24,10 @@ These are the supported example workflows.
 
 - `run_linear_continuous_program.py`: canonical path-graph example for
   `alpha_source_mode="continuous_program"`.
-- `run_bifurcation_state_anchor.py`: canonical branching-graph example for
+- `run_branching_state_anchor.py`: canonical branching-graph example for
   `alpha_source_mode="state_anchor"`.
 - `run_mvp_linear.py`: compact 20-gene path-graph smoke example.
-- `run_mvp_bifurcation.py`: compact branching-graph smoke example with
+- `run_mvp_branching.py`: compact branching-graph smoke example with
   continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
 - `run_sergio_ds6_dynamic_graph_stepfix.py`: canonical DS6 benchmark rerun with the corrected `step` semantics, official-style scanpy/scVelo outputs, and regulation diagnostics.
@@ -48,7 +48,7 @@ gene phase portraits.
 ```bash
 python examples/tutorial.py
 python examples/run_linear_continuous_program.py
-python examples/run_bifurcation_state_anchor.py
+python examples/run_branching_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
@@ -61,10 +61,10 @@ Current generated output groups are:
 - `examples/outputs/tutorial/`: tutorial path-graph and branching-graph outputs.
 - `examples/outputs/linear_continuous_program/`: canonical path-graph continuous
   master-program example.
-- `examples/outputs/bifurcation_state_anchor/`: canonical branching-graph
+- `examples/outputs/branching_state_anchor/`: canonical branching-graph
   state-anchor example.
 - `examples/outputs/linear_20gene/`: small path-graph MVP sanity dataset.
-- `examples/outputs/bifurcation_20gene_3master/`: small hand-built GRN
+- `examples/outputs/branching_20gene_3master/`: small hand-built GRN
   branching-graph dataset.
 - `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
   showcase plots.

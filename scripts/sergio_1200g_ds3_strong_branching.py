@@ -165,7 +165,7 @@ def main() -> None:
         graph=graph,
         production_profile=profile,
         alpha_source_mode="state_anchor",
-        initialization_policy="parent_terminal",
+        child_initialization_policy="parent_terminal",
         sampling_policy="state_transient",
         n_cells_per_state=n_cells_per_state,
         root_time=args.root_time,

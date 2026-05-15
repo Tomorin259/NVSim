@@ -211,7 +211,7 @@ Recommended entry points:
 ```bash
 python examples/tutorial.py
 python examples/run_linear_continuous_program.py
-python examples/run_bifurcation_state_anchor.py
+python examples/run_branching_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
@@ -345,7 +345,7 @@ pip install -e .[dev]
 
 `StateProductionProfile` 是用户提供的 simulation design input，可以手写、采样、复制自 SERGIO 风格 production table，或者由外部 cluster-level TF activity 粗略估计。
 
-如果你在 bifurcation 中使用 `state_anchor`，推荐直接围绕这组 canonical 参数思考：
+如果你在 branching graph 中使用 `state_anchor`，推荐直接围绕这组 canonical 参数思考：
 
 graph-based `state_anchor` 模式下，需要提供 graph 和与 graph state 对齐的 `production_profile`。每条 edge 都表示一次 parent-to-child 的 source production 过渡，`transition_schedule` 控制这条 segment 上的切换形状。分化轨迹默认更推荐 `transition_schedule="sigmoid"`，因为它比 hard step 更平滑。
 
@@ -431,7 +431,7 @@ result = simulate(
 ```bash
 python examples/tutorial.py
 python examples/run_linear_continuous_program.py
-python examples/run_bifurcation_state_anchor.py
+python examples/run_branching_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py

@@ -19,7 +19,7 @@ from nvsim.production import StateProductionProfile
 from nvsim.simulate import simulate
 
 
-def build_bifurcation_result(capture_rate: float = 0.5, dropout_rate: float = 0.02, poisson_observed: bool = True):
+def build_branching_result(capture_rate: float = 0.5, dropout_rate: float = 0.02, poisson_observed: bool = True):
     grn = build_example_grn()
     profile = StateProductionProfile(
         pd.DataFrame(
@@ -48,7 +48,7 @@ def build_bifurcation_result(capture_rate: float = 0.5, dropout_rate: float = 0.
 
 
 def main() -> None:
-    result = build_bifurcation_result()
+    result = build_branching_result()
     try:
         adata = to_anndata(result)
     except ImportError:
@@ -61,7 +61,7 @@ def main() -> None:
             "obs_columns": list(result["obs"].columns),
         })
     else:
-        out = Path(__file__).with_name("outputs") / "bifurcation_20gene_3master" / "mvp_bifurcation.h5ad"
+        out = Path(__file__).with_name("outputs") / "branching_20gene_3master" / "mvp_branching.h5ad"
         out.parent.mkdir(parents=True, exist_ok=True)
         adata.write_h5ad(out)
         print(f"saved {out}")

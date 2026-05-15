@@ -93,7 +93,7 @@ def linear_parameters() -> dict[str, object]:
     }
 
 
-def bifurcation_parameters() -> dict[str, object]:
+def branching_parameters() -> dict[str, object]:
     return {
         "graph": branching_tutorial_graph(),
         "production_profile": build_tutorial_profile(),
@@ -120,8 +120,8 @@ def run_linear_tutorial() -> dict:
     return simulate(build_tutorial_grn(), graph=linear_graph(), **linear_parameters())
 
 
-def run_bifurcation_tutorial() -> dict:
-    params = bifurcation_parameters().copy()
+def run_branching_tutorial() -> dict:
+    params = branching_parameters().copy()
     graph = params.pop("graph")
     return simulate(build_tutorial_grn(), graph=graph, **params)
 
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     out_dir = Path(__file__).with_name("outputs") / "tutorial"
     out_dir.mkdir(parents=True, exist_ok=True)
     linear_result = run_linear_tutorial()
-    branching_result = run_bifurcation_tutorial()
+    branching_result = run_branching_tutorial()
     _write_if_possible(linear_result, out_dir / "tutorial_linear_graph.h5ad")
     _write_if_possible(branching_result, out_dir / "tutorial_branching_graph.h5ad")
     _print_summary("linear_graph", linear_result)

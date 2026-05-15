@@ -1,4 +1,4 @@
-"""Run the canonical bifurcation example for alpha_source_mode="state_anchor"."""
+"""Run the canonical branching example for alpha_source_mode="state_anchor"."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ if str(ROOT) not in sys.path:
 
 from nvsim.output import to_anndata
 
-from tutorial import run_bifurcation_tutorial
+from tutorial import run_branching_tutorial
 
 
 def main() -> None:
-    result = run_bifurcation_tutorial()
-    output_dir = Path(__file__).with_name("outputs") / "bifurcation_state_anchor"
+    result = run_branching_tutorial()
+    output_dir = Path(__file__).with_name("outputs") / "branching_state_anchor"
     output_dir.mkdir(parents=True, exist_ok=True)
-    h5ad_path = output_dir / "bifurcation_state_anchor.h5ad"
+    h5ad_path = output_dir / "branching_state_anchor.h5ad"
 
     try:
         adata = to_anndata(result)

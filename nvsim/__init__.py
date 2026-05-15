@@ -23,7 +23,6 @@ from .production import (
 )
 from .modes import (
     StateGraph,
-    DifferentiationGraph,
     branching_graph,
     coerce_graph,
     path_graph,
@@ -74,7 +73,6 @@ __all__ = [
     "AlphaProgram",
     "StateProductionProfile",
     "StateGraph",
-    "DifferentiationGraph",
     "coerce_graph",
     "path_graph",
     "branching_graph",

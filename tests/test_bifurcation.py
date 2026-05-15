@@ -79,7 +79,7 @@ def test_branching_parent_terminal_is_default_child_initialization():
 
 
 def test_branching_can_use_parent_steady_state_initialization():
-    result = simulate(_graph_grn(), **_branching_kwargs(), initialization_policy="parent_steady_state")
+    result = simulate(_graph_grn(), **_branching_kwargs(), child_initialization_policy="parent_steady_state")
     assert result["uns"]["state_initialization"]["branch_0"]["source"] == "parent_state_steady_state"
 
 

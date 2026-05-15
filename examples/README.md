@@ -30,7 +30,8 @@ These are the supported example workflows.
 - `run_mvp_bifurcation.py`: compact branching-graph smoke example with
   continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
-- `run_sergio_ds6_dynamic_graph.py`: SERGIO-style `simulation_mode="sergio_differentiation"` re-run of the DS6 dynamic dataset.
+- `run_sergio_ds6_dynamic_graph.py`: compact DS6 graph rerun example.
+- `run_sergio_ds6_dynamic_graph_stepfix.py`: canonical DS6 benchmark rerun with the corrected `step` semantics, official-style scanpy/scVelo outputs, and regulation diagnostics.
 
 ### Plotting
 
@@ -51,7 +52,7 @@ python examples/run_linear_continuous_program.py
 python examples/run_bifurcation_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
-python examples/run_sergio_ds6_dynamic_graph.py
+python examples/run_sergio_ds6_dynamic_graph_stepfix.py
 ```
 
 ## Output Naming
@@ -69,4 +70,5 @@ Current generated output groups are:
 - `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
   showcase plots.
 - `examples/outputs/trrust_mouse_small/`: external TRRUST benchmark outputs.
-- `examples/outputs/sergio_100g_ds6_sergio_differentiation_20260514/`: current SERGIO-style DS6 dynamic benchmark re-run, including H5AD, CSV/NPZ exports, phase gallery, and velocity showcase plots.
+- `examples/outputs/ds6_pt_s3_c300_stepfix/`: canonical DS6 benchmark rerun with corrected `step` transitions and full diagnostics.
+- `examples/outputs/ds6_pt_s3_c300_stepfix_kinsergio/`: the same benchmark with fixed SERGIO kinetics for controlled comparison.

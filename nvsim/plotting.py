@@ -251,13 +251,16 @@ def select_genes(adata: Any, representative_genes: Any = "auto") -> list[str]:
         if masters:
             add(max(masters, key=lambda gene: float(np.var(alpha[:, gene_to_idx[gene]]))))
 
-    branch = adata.obs["branch"].astype(str).to_numpy() if "branch" in adata.obs else np.array(["all"] * adata.n_obs)
-    b0 = branch == "branch_0"
-    b1 = branch == "branch_1"
-    if b0.any() and b1.any():
-        alpha_gap = np.abs(alpha[b0].mean(axis=0) - alpha[b1].mean(axis=0))
-        spliced_gap = np.abs(spliced[b0].mean(axis=0) - spliced[b1].mean(axis=0))
-        add(genes[int(np.argmax(alpha_gap + spliced_gap))])
+    group_key = "state" if "state" in adata.obs else ("branch" if "branch" in adata.obs else None)
+    if group_key is not None:
+        labels = adata.obs[group_key].astype(str).to_numpy()
+        groups = pd.unique(labels)
+        if len(groups) >= 2:
+            alpha_means = np.vstack([alpha[labels == group].mean(axis=0) for group in groups])
+            spliced_means = np.vstack([spliced[labels == group].mean(axis=0) for group in groups])
+            alpha_gap = alpha_means.max(axis=0) - alpha_means.min(axis=0)
+            spliced_gap = spliced_means.max(axis=0) - spliced_means.min(axis=0)
+            add(genes[int(np.argmax(alpha_gap + spliced_gap))])
 
     add(genes[int(np.argmax(np.var(velocity, axis=0)))])
 
@@ -321,7 +324,7 @@ def _plot_velocity_stream(adata: Any, output_path: Path, basis: str, dpi: int) -
         adata,
         basis=basis,
         vkey="velocity",
-        color="branch" if "branch" in adata.obs else None,
+        color="state" if "state" in adata.obs else ("branch" if "branch" in adata.obs else None),
         title="Ground-truth RNA velocity stream",
         show=False,
         ax=ax,

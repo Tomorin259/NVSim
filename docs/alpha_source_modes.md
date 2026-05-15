@@ -72,7 +72,7 @@ alpha_m(t) = (1 - w(t)) * B[parent_state, m] + w(t) * B[child_state, m]
 
 Supported transition schedules are:
 
-- `step`: hard switch at `transition_midpoint`;
+- `step`: immediate switch to the child anchor at the parent->child boundary (`transition_midpoint` is ignored);
 - `linear`: linear interpolation over the segment;
 - `sigmoid`: smooth S-shaped interpolation.
 

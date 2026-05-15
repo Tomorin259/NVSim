@@ -1,13 +1,10 @@
-"""NVSim MVP 的核心 ODE 模拟器。
+"""Core deterministic ODE simulator for the graph-based NVSim API.
 
-本模块把完整建模链串起来：GRN -> alpha(t) -> unspliced u(t) ->
-spliced s(t) -> true velocity。核心方程是：
-
-    du/dt = alpha(t) - beta * u
-    ds/dt = beta * u - gamma * s
-
-其中 true_velocity 保存 ds/dt，true_velocity_u 保存 du/dt。
-所有 graph segment 都复用同一个 ODE 积分器。
+This module assembles the full modeling chain
+``GRN -> alpha(t) -> unspliced u(t) -> spliced s(t) -> true velocity``
+under a unified rooted-DAG trajectory interface. All graph states reuse the
+same segment integrator and differ only in their source alpha, initialization,
+and sampling configuration.
 """
 
 from __future__ import annotations
@@ -25,7 +22,7 @@ from .grn import (
     calibrate_grn_half_response,
     estimate_state_mean_expression,
 )
-from .modes import StateGraph, DifferentiationGraph, coerce_graph
+from .modes import StateGraph, coerce_graph
 from .noise import _resolve_capture_model_name, generate_observed_counts
 from .output import make_result_dict
 from .production import AlphaProgram, StateProductionProfile, coerce_programs, constant
@@ -402,9 +399,8 @@ def _alpha_from_state(
     regulator_activity: str = "spliced",
     return_edge_contributions: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-    # 根据当前 spliced 状态 s(t) 重新计算 alpha(t)。
-    # master 的 alpha 优先来自 source_alpha；否则来自时间程序。
-    # target/intermediate 的 alpha 来自 GRN。
+    # Recompute alpha(t) from the current regulator activity.
+    # Masters use explicit source alpha when provided; other genes follow the GRN.
     genes = grn.genes
     normalized_t = 0.0 if time_end == 0 else float(np.clip(t / time_end, 0.0, 1.0))
     source = pd.Series(0.0, index=pd.Index(genes, name="gene"), dtype=float)
@@ -458,7 +454,7 @@ def _derivative(
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
     regulator_activity: str = "spliced",
 ) -> tuple[np.ndarray, np.ndarray]:
-    # y 是拼接状态向量：[u_1...u_G, s_1...s_G]。
+    # y concatenates the current unspliced and spliced state: [u_1..u_G, s_1..s_G].
     n_genes = len(beta)
     u = np.maximum(y[:n_genes], 0.0)
     s = np.maximum(y[n_genes:], 0.0)
@@ -477,7 +473,7 @@ def _derivative(
         source_alpha_fn,
         regulator_activity,
     )
-    # RNA velocity 方程：du/dt -> true_velocity_u；ds/dt -> true_velocity。
+    # RNA velocity outputs track du/dt and ds/dt separately for diagnostics.
     du = alpha - beta * u
     ds = beta * u - gamma * s
     return np.concatenate([du, ds]), alpha
@@ -500,7 +496,7 @@ def _rk4_step(
     source_alpha_fn: Callable[[float], pd.Series] | None = None,
     regulator_activity: str = "spliced",
 ) -> np.ndarray:
-    """执行一步 RK4；每个中间状态都会重新通过 GRN 计算 alpha。"""
+    """Execute one RK4 step while recomputing alpha at each intermediate state."""
 
     k1, _ = _derivative(
         y,
@@ -619,7 +615,7 @@ def _simulate_segment(
     global_time = time_offset + local_time
     alpha_time_end = program_time_end if program_time_end is not None else time_offset + time_end
 
-    # 内部 time-course 是 timepoints x genes；采样后输出才是 cells x genes。
+    # Internal segment arrays are timepoints x genes; sampled outputs become cells x genes.
     u = np.zeros((len(local_time), n_genes), dtype=float)
     s = np.zeros((len(local_time), n_genes), dtype=float)
     alpha = np.zeros((len(local_time), n_genes), dtype=float)
@@ -651,7 +647,7 @@ def _simulate_segment(
         alpha[0], edge_contributions[0] = alpha0
     else:
         alpha[0] = alpha0
-    # true_velocity 是 spliced velocity ds/dt；true_velocity_u 是 unspliced velocity du/dt。
+    # true_velocity stores ds/dt and true_velocity_u stores du/dt.
     velocity[0] = beta * u[0] - gamma * s[0]
     true_velocity_u[0] = alpha[0] - beta * u[0]
 
@@ -840,7 +836,7 @@ def _resolve_mode_defaults(
         raise ValueError(f"kinetics_mode must be one of {sorted(KINETICS_MODES)}")
 
     if resolved_initialization_policy not in INITIALIZATION_POLICIES:
-        raise ValueError(f"initialization_policy must be one of {sorted(INITIALIZATION_POLICIES)}")
+        raise ValueError(f"child_initialization_policy must be one of {sorted(INITIALIZATION_POLICIES)}")
     if resolved_sampling_policy not in SAMPLING_POLICIES:
         raise ValueError(f"sampling_policy must be one of {sorted(SAMPLING_POLICIES)}")
 
@@ -849,7 +845,7 @@ def _resolve_mode_defaults(
         "simulator": resolved_simulator,
         "graph": resolved_graph,
         "alpha_source_mode": resolved_alpha_source_mode,
-        "initialization_policy": resolved_initialization_policy,
+        "child_initialization_policy": resolved_initialization_policy,
         "sampling_policy": resolved_sampling_policy,
         "transition_schedule": resolved_transition_schedule,
         "regulator_activity": resolved_regulator_activity,
@@ -1103,7 +1099,7 @@ def _simulate_graph_impl(
     allow_profile_targets_as_masters: bool = False,
     allow_snapshot_replacement: bool = False,
     alpha_source_mode: str | None = None,
-    initialization_policy: str = "parent_terminal",
+    child_initialization_policy: str = "parent_terminal",
     sampling_policy: str = "state_transient",
     transition_schedule: str = "sigmoid",
     transition_midpoint: float = 0.5,
@@ -1114,8 +1110,10 @@ def _simulate_graph_impl(
     resolved_graph = coerce_graph(graph)
     if resolved_graph is None:
         raise ValueError("graph must be provided for simulator graph")
-    if initialization_policy not in INITIALIZATION_POLICIES:
-        raise ValueError(f"initialization_policy must be one of {sorted(INITIALIZATION_POLICIES)}")
+    if child_initialization_policy not in INITIALIZATION_POLICIES:
+        raise ValueError(
+            f"child_initialization_policy must be one of {sorted(INITIALIZATION_POLICIES)}"
+        )
     if sampling_policy not in SAMPLING_POLICIES:
         raise ValueError(f"sampling_policy must be one of {sorted(SAMPLING_POLICIES)}")
 
@@ -1264,7 +1262,7 @@ def _simulate_graph_impl(
                 init_u = steady_states[state]["u"].reindex(grn.genes).to_numpy(dtype=float)
                 init_s = steady_states[state]["s"].reindex(grn.genes).to_numpy(dtype=float)
                 init_source = "state_steady_state"
-        elif initialization_policy == "parent_steady_state":
+        elif child_initialization_policy == "parent_steady_state":
             init_u = steady_states[parent_state]["u"].reindex(grn.genes).to_numpy(dtype=float)
             init_s = steady_states[parent_state]["s"].reindex(grn.genes).to_numpy(dtype=float)
             init_source = "parent_state_steady_state"
@@ -1349,7 +1347,7 @@ def _simulate_graph_impl(
                 {
                     "pseudotime": segment["pseudotime"][idx],
                     "local_time": segment["local_time"][idx],
-                    "branch": state,
+                    "branch": state,  # compatibility alias for state
                     "segment": state,
                     "state": state,
                     "parent_state": parent_state,
@@ -1371,7 +1369,7 @@ def _simulate_graph_impl(
                 {
                     "pseudotime": state_segments[state]["pseudotime"],
                     "local_time": state_segments[state]["local_time"],
-                    "branch": state,
+                    "branch": state,  # compatibility alias for state
                     "state": state,
                     "parent_state": resolved_graph.parent_of(state),
                     "state_depth": state_depths[state],
@@ -1411,7 +1409,7 @@ def _simulate_graph_impl(
         "production_profile_states": list(production_profile.states) if production_profile is not None else None,
         "production_profile_master_genes": list(production_profile.genes) if production_profile is not None else None,
         "profile_gene_policy": profile_gene_policy,
-        "initialization_policy": initialization_policy,
+        "child_initialization_policy": child_initialization_policy,
         "sampling_policy": sampling_policy,
         "transition_schedule": transition_schedule if resolved_alpha_source_mode == "state_anchor" else None,
         "transition_midpoint": transition_midpoint if resolved_alpha_source_mode == "state_anchor" else None,
@@ -1493,17 +1491,28 @@ def simulate(
     simulator: str | None = None,
     simulation_mode: str | None = None,
     graph: StateGraph | pd.DataFrame | dict[str, object] | None = None,
+    child_initialization_policy: str | None = None,
     initialization_policy: str | None = None,
     sampling_policy: str | None = None,
     **kwargs: object,
 ) -> dict:
+    if child_initialization_policy is not None and initialization_policy is not None:
+        raise ValueError("Specify only one of child_initialization_policy and initialization_policy")
+    if child_initialization_policy is None and initialization_policy is not None:
+        warnings.warn(
+            "initialization_policy is deprecated; use child_initialization_policy instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        child_initialization_policy = initialization_policy
+
     resolved_mode = _resolve_mode_defaults(
         simulator=simulator,
         simulation_mode=simulation_mode,
         graph=graph,
         production_profile=kwargs.get("production_profile"),
         alpha_source_mode=kwargs.get("alpha_source_mode"),
-        initialization_policy=initialization_policy,
+        initialization_policy=child_initialization_policy,
         sampling_policy=sampling_policy,
         transition_schedule=kwargs.get("transition_schedule"),
         regulator_activity=kwargs.get("regulator_activity"),
@@ -1519,7 +1528,7 @@ def simulate(
     return _simulate_graph_impl(
         grn,
         graph=resolved_mode["graph"],
-        initialization_policy=str(resolved_mode["initialization_policy"]),
+        child_initialization_policy=str(resolved_mode["child_initialization_policy"]),
         sampling_policy=str(resolved_mode["sampling_policy"]),
         simulation_mode=resolved_mode["simulation_mode"],
         **patched_kwargs,

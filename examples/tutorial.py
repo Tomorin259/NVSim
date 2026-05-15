@@ -60,7 +60,7 @@ def custom_dag_tutorial_graph() -> StateGraph:
 
     Path and branching helpers are convenience wrappers. Arbitrary rooted DAGs
     still use the same `simulate(..., graph=...)` entry point. See
-    `examples/run_sergio_ds6_dynamic_graph.py` for a larger real dataset.
+    `examples/run_sergio_ds6_dynamic_graph_stepfix.py` for the canonical DS6 benchmark rerun.
     """
 
     edges = pd.DataFrame(
@@ -98,7 +98,7 @@ def bifurcation_parameters() -> dict[str, object]:
         "graph": branching_tutorial_graph(),
         "production_profile": build_tutorial_profile(),
         "alpha_source_mode": "state_anchor",
-        "initialization_policy": "parent_terminal",
+        "child_initialization_policy": "parent_terminal",
         "sampling_policy": "state_transient",
         "n_cells_per_state": {"root": 30, "branch_A": 40, "branch_B": 40},
         "root_time": 1.8,

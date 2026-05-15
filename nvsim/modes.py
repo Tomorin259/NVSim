@@ -117,8 +117,6 @@ class StateGraph:
             raise ValueError(f"unknown state graph state(s): {missing}")
 
 
-DifferentiationGraph = StateGraph
-
 
 def coerce_graph(
     graph: StateGraph | pd.DataFrame | dict[str, object] | None,
@@ -137,11 +135,6 @@ def coerce_graph(
         return StateGraph(edges=edges, states=None if states is None else tuple(str(state) for state in states))
     raise TypeError("graph must be a StateGraph, DataFrame, dict, or None")
 
-
-def coerce_differentiation_graph(
-    graph: StateGraph | pd.DataFrame | dict[str, object] | None,
-) -> StateGraph | None:
-    return coerce_graph(graph)
 
 
 def path_graph(states: list[str] | tuple[str, ...]) -> StateGraph:

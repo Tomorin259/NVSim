@@ -56,7 +56,7 @@ def test_sergio_differentiation_mode_resolves_expected_defaults():
     assert config["simulation_mode"] == "sergio_differentiation"
     assert config["simulator"] == "graph"
     assert config["alpha_source_mode"] == "state_anchor"
-    assert config["initialization_policy"] == "parent_steady_state"
+    assert config["child_initialization_policy"] == "parent_steady_state"
     assert config["sampling_policy"] == "state_transient"
     assert config["transition_schedule"] == "step"
     assert config["regulator_activity"] == "unspliced"

@@ -81,6 +81,24 @@ def test_output_dimensions_are_correct():
     assert set(["pseudotime", "branch", "state"]).issubset(result["obs"].columns)
 
 
+def test_cell_lognormal_capture_efficiency_is_recorded_in_obs_and_config():
+    grn = _small_grn()
+    result = simulate(
+        grn,
+        **_chain_kwargs(),
+        capture_rate=0.5,
+        capture_efficiency_mode="cell_lognormal",
+        capture_efficiency_cv=0.2,
+    )
+
+    eff = result["obs"]["capture_efficiency"].to_numpy()
+    assert eff.shape == (12,)
+    assert np.all((eff >= 0.0) & (eff <= 1.0))
+    assert len(np.unique(np.round(eff, 6))) > 1
+    assert result["uns"]["simulation_config"]["capture_efficiency_mode"] == "cell_lognormal"
+    assert result["uns"]["simulation_config"]["capture_efficiency_cv"] == 0.2
+
+
 def test_var_metadata_distinguishes_gene_role_from_gene_class():
     grn = _small_grn()
     result = simulate(grn, **_chain_kwargs())

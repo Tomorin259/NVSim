@@ -178,7 +178,7 @@ Use `path_graph([...])` for chain-like trajectories and `branching_graph(root, [
 
 Observed-count generation supports two canonical capture models:
 
-- `poisson_capture`: scale by `capture_rate`, then optionally sample Poisson counts
+- `poisson_capture`: scale by per-cell capture efficiency centered on `capture_rate`, then optionally sample Poisson counts
 - `binomial_capture`: round latent counts, then apply molecule-level binomial capture
 
 Recommended interpretation:
@@ -190,6 +190,8 @@ Main noise parameters:
 
 - `capture_model`
 - `capture_rate`
+- `capture_efficiency_mode`
+- `capture_efficiency_cv`
 - `dropout_rate`
 - `noise_seed`
 
@@ -385,7 +387,7 @@ result = simulate(
 
 当前 observed noise 只有两种 canonical capture model：
 
-- `poisson_capture`：先按 `capture_rate` 缩放，再可选做 Poisson 采样
+- `poisson_capture`：先按以 `capture_rate` 为中心的逐细胞 capture efficiency 缩放，再可选做 Poisson 采样
 - `binomial_capture`：先把 latent count 四舍五入，再做逐分子的 binomial capture
 
 可以这样理解：
@@ -397,6 +399,8 @@ result = simulate(
 
 - `capture_model`
 - `capture_rate`
+- `capture_efficiency_mode`
+- `capture_efficiency_cv`
 - `dropout_rate`
 - `noise_seed`
 

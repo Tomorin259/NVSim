@@ -1004,6 +1004,8 @@ def _observed_from_true(
     poisson_observed: bool,
     dropout_rate: float,
     capture_model: str | None = None,
+    capture_efficiency_mode: str = "constant",
+    capture_efficiency_cv: float = 0.0,
 ) -> dict[str, np.ndarray]:
     return generate_observed_counts(
         true_u,
@@ -1013,6 +1015,8 @@ def _observed_from_true(
         poisson=poisson_observed,
         dropout_rate=dropout_rate,
         capture_model=capture_model,
+        capture_efficiency_mode=capture_efficiency_mode,
+        capture_efficiency_cv=capture_efficiency_cv,
     )
 
 
@@ -1040,6 +1044,8 @@ def _simulate_graph_impl(
     poisson_observed: bool = True,
     dropout_rate: float = 0.0,
     capture_model: str | None = None,
+    capture_efficiency_mode: str = "constant",
+    capture_efficiency_cv: float = 0.0,
     regulator_activity: str = "spliced",
     half_response_calibration: str = "off",
     grn_calibration: Mapping[str, object] | None = None,
@@ -1275,6 +1281,8 @@ def _simulate_graph_impl(
         poisson_observed=poisson_observed,
         dropout_rate=dropout_rate,
         capture_model=resolved_capture_model,
+        capture_efficiency_mode=capture_efficiency_mode,
+        capture_efficiency_cv=capture_efficiency_cv,
     )
 
     global_index_map: dict[str, np.ndarray] = {}
@@ -1310,6 +1318,7 @@ def _simulate_graph_impl(
         )
         offset += n
     obs = pd.concat(obs_frames, axis=0)
+    obs["capture_efficiency"] = observed["capture_efficiency"]
 
     time_grid = pd.concat(
         [
@@ -1366,6 +1375,8 @@ def _simulate_graph_impl(
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
         "capture_rate": capture_rate,
         "capture_model": resolved_capture_model,
+        "capture_efficiency_mode": capture_efficiency_mode,
+        "capture_efficiency_cv": capture_efficiency_cv,
         "regulator_activity": regulator_activity,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
@@ -1379,6 +1390,8 @@ def _simulate_graph_impl(
     noise_config = {
         "capture_model": config["capture_model"],
         "capture_rate": capture_rate,
+        "capture_efficiency_mode": capture_efficiency_mode,
+        "capture_efficiency_cv": capture_efficiency_cv,
         "poisson_observed": poisson_observed,
         "dropout_rate": dropout_rate,
     }

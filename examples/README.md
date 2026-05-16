@@ -31,6 +31,7 @@ These are the supported example workflows.
   continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
 - `run_sergio_ds6_dynamic_graph_stepfix.py`: canonical DS6 benchmark rerun with the corrected `step` semantics, official-style scanpy/scVelo outputs, and regulation diagnostics.
+- `run_ds6_stepfix_observation_compare.py`: clean vs tuned-noisy DS6 observation comparison with scVelo moments phase portraits and total-expression UMAPs.
 
 ### Plotting
 
@@ -52,6 +53,7 @@ python examples/run_branching_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
+python examples/run_ds6_stepfix_observation_compare.py
 ```
 
 ## Output Naming
@@ -70,4 +72,5 @@ Current generated output groups are:
   showcase plots.
 - `examples/outputs/trrust_mouse_small/`: external TRRUST benchmark outputs.
 - `examples/outputs/ds6_pt_s3_c300_stepfix/`: canonical DS6 benchmark rerun with corrected `step` transitions and full diagnostics.
+- `examples/outputs/ds6_pt_s3_c300_stepfix/obs_compare_tuned/`: canonical clean vs tuned-noisy observation comparison for DS6 stepfix.
 - `examples/outputs/ds6_pt_s3_c300_stepfix_kinsergio/`: the same benchmark with fixed SERGIO kinetics for controlled comparison.

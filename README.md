@@ -215,6 +215,7 @@ python examples/run_branching_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
+python examples/run_ds6_stepfix_observation_compare.py
 ```
 
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
@@ -424,6 +425,7 @@ python examples/run_branching_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
+python examples/run_ds6_stepfix_observation_compare.py
 ```
 
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。

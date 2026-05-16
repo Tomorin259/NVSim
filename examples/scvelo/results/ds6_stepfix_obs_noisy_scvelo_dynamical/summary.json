@@ -1,0 +1,66 @@
+{
+  "input_h5ad": "/mnt/second19T/zhaozelin/simulator/NVSim/examples/outputs/ds6_pt_s3_c300_stepfix/obs_compare_tuned/ds6_stepfix_obs_noisy_raw.h5ad",
+  "results_dir": "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical",
+  "conda_env": "indicators",
+  "input_mode": "raw noisy counts",
+  "scvelo_version": "0.2.5",
+  "scanpy_version": "1.9.3",
+  "params": {
+    "n_jobs": 8,
+    "n_neighbors": 12,
+    "n_pcs": 20,
+    "random_state": 17
+  },
+  "files": {
+    "stream": "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/umap_scvelo_velocity_stream.png",
+    "umap": [
+      "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/umap_scvelo_clusters.png",
+      "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/umap_scvelo_pseudotime.png",
+      "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/umap_scvelo_latent_time.png"
+    ],
+    "phase": [
+      "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/phase_scvelo_dynamical_1.png",
+      "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/phase_scvelo_dynamical_2.png",
+      "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/phase_scvelo_dynamical_3.png",
+      "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/phase_scvelo_dynamical_4.png"
+    ],
+    "h5ad": "/mnt/second19T/zhaozelin/simulator/NVSim/examples/scvelo/results/ds6_stepfix_obs_noisy_scvelo_dynamical/ds6_stepfix_obs_noisy_scvelo_dynamical.h5ad"
+  },
+  "layers": [
+    "Ms",
+    "Mu",
+    "fit_t",
+    "fit_tau",
+    "fit_tau_",
+    "spliced",
+    "unspliced",
+    "velocity",
+    "velocity_u"
+  ],
+  "fit_columns": [
+    "fit_alpha",
+    "fit_beta",
+    "fit_gamma",
+    "fit_t_",
+    "fit_scaling",
+    "fit_std_u",
+    "fit_std_s",
+    "fit_likelihood",
+    "fit_u0",
+    "fit_s0",
+    "fit_pval_steady",
+    "fit_steady_u",
+    "fit_steady_s",
+    "fit_variance",
+    "fit_alignment_scaling",
+    "fit_r2"
+  ],
+  "clusters": [
+    "bin_0",
+    "bin_1",
+    "bin_2",
+    "bin_3",
+    "bin_4",
+    "bin_5"
+  ]
+}

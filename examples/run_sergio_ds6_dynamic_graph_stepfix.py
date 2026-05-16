@@ -135,7 +135,7 @@ def save_core_outputs(bundle: dict[str, object]) -> dict[str, object]:
     bmat = bundle["bmat"]
 
     adata = to_anndata(result)
-    h5ad_path = output_dir / "sergio_100g_ds6_dynamic_graph_stepfix.h5ad"
+    h5ad_path = output_dir / "ds6_stepfix_clean_simulation.h5ad"
     adata.write_h5ad(h5ad_path)
 
     obs_path = output_dir / "obs.csv"
@@ -188,7 +188,7 @@ def save_official_style_outputs(adata: ad.AnnData, output_dir: Path) -> dict[str
     sc.pp.pca(clean, n_comps=min(30, clean.n_vars - 1))
     sc.pp.neighbors(clean, n_neighbors=30, n_pcs=min(30, clean.obsm["X_pca"].shape[1]))
     sc.tl.umap(clean, random_state=7)
-    clean_h5ad = off / "official_style_clean_total_scanpy.h5ad"
+    clean_h5ad = off / "ds6_stepfix_clean_total_scanpy.h5ad"
     clean.write_h5ad(clean_h5ad)
 
     plots = []

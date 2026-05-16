@@ -57,6 +57,25 @@ python examples/run_ds6_stepfix_observation_compare.py
 ```
 
 ## Output Naming
+## DS6 Artifact Naming
+
+For the canonical DS6 stepfix outputs, file names now encode the processing stage explicitly:
+
+- `ds6_stepfix_clean_simulation.h5ad`: canonical clean simulator output written directly by `run_sergio_ds6_dynamic_graph_stepfix.py`.
+- `ds6_stepfix_obs_clean_raw.h5ad`: clean observed `spliced` / `unspliced` counts before scVelo preprocessing.
+- `ds6_stepfix_obs_noisy_raw.h5ad`: noisy observed `spliced` / `unspliced` counts before scVelo preprocessing.
+- `ds6_stepfix_obs_clean_scvelo_moments.h5ad`: clean observed counts after `filter_and_normalize + moments`.
+- `ds6_stepfix_obs_noisy_scvelo_moments.h5ad`: noisy observed counts after `filter_and_normalize + moments`.
+- `ds6_stepfix_obs_clean_total_umap.h5ad`: clean total-expression UMAP working object.
+- `ds6_stepfix_obs_noisy_total_umap.h5ad`: noisy total-expression UMAP working object.
+- `ds6_stepfix_obs_noisy_scvelo_dynamical.h5ad`: scVelo dynamical output starting from `ds6_stepfix_obs_noisy_raw.h5ad`.
+
+Plot files follow the same rule:
+
+- `phase_*_scvelo_moments_*.png`: phase portraits built from `Mu/Ms`.
+- `umap_*_total_*.png`: total-expression UMAPs.
+- `umap_scvelo_*.png`: scVelo dynamical UMAPs and stream plots.
+
 
 Current generated output groups are:
 

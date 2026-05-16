@@ -220,6 +220,10 @@ python examples/run_ds6_stepfix_observation_compare.py
 
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
 
+### DS6 Artifact Naming
+
+Canonical DS6 output names now distinguish clean simulator outputs, raw observed-count artifacts, scVelo-moments artifacts, total-expression UMAP artifacts, and scVelo dynamical artifacts. See [Examples Guide](examples/README.md) for the full naming table.
+
 ### Migration Notes
 
 Topology is graph-only. New code should always call `simulate(..., graph=...)` and express topology through `StateGraph`, `path_graph(...)`, or `branching_graph(...)`.

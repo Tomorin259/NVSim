@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Generate clean/noisy DS6 stepfix observation comparisons with compact names."""
+"""Generate clean/noisy DS6 stepfix observation comparisons with canonical names."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import math
 from pathlib import Path
 import sys
 import warnings
@@ -26,7 +25,7 @@ if str(ROOT) not in sys.path:
 
 from nvsim.noise import generate_observed_counts
 
-INPUT_H5AD = ROOT / "examples" / "outputs" / "ds6_pt_s3_c300_stepfix" / "sergio_100g_ds6_dynamic_graph_stepfix.h5ad"
+INPUT_H5AD = ROOT / "examples" / "outputs" / "ds6_pt_s3_c300_stepfix" / "ds6_stepfix_clean_simulation.h5ad"
 OUTPUT_DIR = ROOT / "examples" / "outputs" / "ds6_pt_s3_c300_stepfix" / "obs_compare_tuned"
 UTILS_PATH = Path("/mnt/second19T/zhaozelin/velocity/plot/gene_to_use/utils.py")
 STATE_ORDER = ["bin_0", "bin_1", "bin_2", "bin_3", "bin_4", "bin_5"]
@@ -201,7 +200,7 @@ def _panel_umap(clean_umap: ad.AnnData, noisy_umap: ad.AnnData):
     sc.pl.umap(clean_umap, color="pseudotime", color_map="viridis", ax=axes[1, 0], show=False, title="clean total by pseudotime")
     sc.pl.umap(noisy_umap, color="pseudotime", color_map="viridis", ax=axes[1, 1], show=False, title="noisy total by pseudotime")
     fig.tight_layout()
-    fig.savefig(OUTPUT_DIR / "umap_panel.png", dpi=220, bbox_inches="tight")
+    fig.savefig(OUTPUT_DIR / "umap_clean_vs_noisy_total_panel.png", dpi=220, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -287,25 +286,34 @@ def main() -> None:
         capture_efficiency=noisy_layers["capture_efficiency"],
     )
 
+    clean_raw_path = OUTPUT_DIR / "ds6_stepfix_obs_clean_raw.h5ad"
+    noisy_raw_path = OUTPUT_DIR / "ds6_stepfix_obs_noisy_raw.h5ad"
+    clean_raw.write_h5ad(clean_raw_path)
+    noisy_raw.write_h5ad(noisy_raw_path)
+
     clean = _prepare_scvelo(clean_raw)
     noisy = _prepare_scvelo(noisy_raw)
 
-    clean.write_h5ad(OUTPUT_DIR / "clean_scvelo.h5ad")
-    noisy.write_h5ad(OUTPUT_DIR / "noisy_scvelo.h5ad")
+    clean_moments_path = OUTPUT_DIR / "ds6_stepfix_obs_clean_scvelo_moments.h5ad"
+    noisy_moments_path = OUTPUT_DIR / "ds6_stepfix_obs_noisy_scvelo_moments.h5ad"
+    clean.write_h5ad(clean_moments_path)
+    noisy.write_h5ad(noisy_moments_path)
 
-    clean_pages = _plot_phase_pages(clean, out_prefix="phase_clean", tune_clean_arrows=True, plot_phase_portrait=plot_phase_portrait)
-    noisy_pages = _plot_phase_pages(noisy, out_prefix="phase_noisy", tune_clean_arrows=False, plot_phase_portrait=plot_phase_portrait)
+    clean_pages = _plot_phase_pages(clean, out_prefix="phase_clean_scvelo_moments", tune_clean_arrows=True, plot_phase_portrait=plot_phase_portrait)
+    noisy_pages = _plot_phase_pages(noisy, out_prefix="phase_noisy_scvelo_moments", tune_clean_arrows=False, plot_phase_portrait=plot_phase_portrait)
 
     clean_total = np.asarray(src.layers["true_spliced"]) + np.asarray(src.layers["true_unspliced"])
     noisy_total = np.asarray(noisy_layers["spliced"]) + np.asarray(noisy_layers["unspliced"])
     clean_umap = _prepare_total_umap(src, total=clean_total)
     noisy_umap = _prepare_total_umap(src, total=noisy_total)
-    clean_umap.write_h5ad(OUTPUT_DIR / "clean_umap.h5ad")
-    noisy_umap.write_h5ad(OUTPUT_DIR / "noisy_umap.h5ad")
-    _plot_umap(clean_umap, color="state", title="clean total by bin", out_name="umap_clean_bin.png")
-    _plot_umap(noisy_umap, color="state", title="noisy total by bin", out_name="umap_noisy_bin.png")
-    _plot_umap(clean_umap, color="pseudotime", title="clean total by pseudotime", out_name="umap_clean_time.png")
-    _plot_umap(noisy_umap, color="pseudotime", title="noisy total by pseudotime", out_name="umap_noisy_time.png")
+    clean_umap_path = OUTPUT_DIR / "ds6_stepfix_obs_clean_total_umap.h5ad"
+    noisy_umap_path = OUTPUT_DIR / "ds6_stepfix_obs_noisy_total_umap.h5ad"
+    clean_umap.write_h5ad(clean_umap_path)
+    noisy_umap.write_h5ad(noisy_umap_path)
+    _plot_umap(clean_umap, color="state", title="clean total by bin", out_name="umap_clean_total_bin.png")
+    _plot_umap(noisy_umap, color="state", title="noisy total by bin", out_name="umap_noisy_total_bin.png")
+    _plot_umap(clean_umap, color="pseudotime", title="clean total by pseudotime", out_name="umap_clean_total_pseudotime.png")
+    _plot_umap(noisy_umap, color="pseudotime", title="noisy total by pseudotime", out_name="umap_noisy_total_pseudotime.png")
     _panel_umap(clean_umap, noisy_umap)
 
     summary = {
@@ -316,19 +324,23 @@ def main() -> None:
         "clean_arrow_style": CLEAN_ARROW_STYLE,
         "state_order": STATE_ORDER,
         "state_colors": STATE_COLORS,
+        "artifact_classes": {
+            "clean_raw": str(clean_raw_path),
+            "noisy_raw": str(noisy_raw_path),
+            "clean_scvelo_moments": str(clean_moments_path),
+            "noisy_scvelo_moments": str(noisy_moments_path),
+            "clean_total_umap": str(clean_umap_path),
+            "noisy_total_umap": str(noisy_umap_path),
+        },
         "files": {
-            "clean_scvelo": str(OUTPUT_DIR / "clean_scvelo.h5ad"),
-            "noisy_scvelo": str(OUTPUT_DIR / "noisy_scvelo.h5ad"),
-            "clean_umap": str(OUTPUT_DIR / "clean_umap.h5ad"),
-            "noisy_umap": str(OUTPUT_DIR / "noisy_umap.h5ad"),
-            "phase_clean": clean_pages,
-            "phase_noisy": noisy_pages,
+            "phase_clean_scvelo_moments": clean_pages,
+            "phase_noisy_scvelo_moments": noisy_pages,
             "umap": [
-                str(OUTPUT_DIR / "umap_clean_bin.png"),
-                str(OUTPUT_DIR / "umap_noisy_bin.png"),
-                str(OUTPUT_DIR / "umap_clean_time.png"),
-                str(OUTPUT_DIR / "umap_noisy_time.png"),
-                str(OUTPUT_DIR / "umap_panel.png"),
+                str(OUTPUT_DIR / "umap_clean_total_bin.png"),
+                str(OUTPUT_DIR / "umap_noisy_total_bin.png"),
+                str(OUTPUT_DIR / "umap_clean_total_pseudotime.png"),
+                str(OUTPUT_DIR / "umap_noisy_total_pseudotime.png"),
+                str(OUTPUT_DIR / "umap_clean_vs_noisy_total_panel.png"),
             ],
         },
         "metrics": {
@@ -346,8 +358,11 @@ def main() -> None:
     (OUTPUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     (OUTPUT_DIR / "README.txt").write_text(
         "DS6 stepfix clean/noisy observation comparison\n"
-        "- clean/noisy phase portraits use scVelo moments layers Ms/Mu\n"
-        "- noisy counts use tuned poisson_capture with cell-specific capture efficiency\n"
+        "- ds6_stepfix_obs_clean_raw.h5ad: raw clean observed spliced/unspliced counts\n"
+        "- ds6_stepfix_obs_noisy_raw.h5ad: raw noisy observed spliced/unspliced counts\n"
+        "- ds6_stepfix_obs_*_scvelo_moments.h5ad: scVelo filter_and_normalize + moments outputs\n"
+        "- ds6_stepfix_obs_*_total_umap.h5ad: total-expression UMAP inputs/embeddings\n"
+        "- phase_*_scvelo_moments_*.png: phase portraits built from Ms/Mu\n"
         "- clean arrows are intentionally thinner to preserve bin colors\n"
     )
     print(OUTPUT_DIR)

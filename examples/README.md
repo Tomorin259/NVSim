@@ -37,9 +37,9 @@ These are the supported example workflows.
 
 ### Plotting
 
-- `plot_velocity_showcase.py`: uses `nvsim.plotting` to generate scanpy/scVelo
-  RNA velocity-style showcase figures under
-  `examples/outputs/velocity_showcase/`.
+There is no longer a standalone plotting-only entrypoint under `examples/`.
+Plotting is exercised through the benchmark/example runners and through the
+public `nvsim.plotting` module itself.
 
 `nvsim.plotting` is the single public plotting module. It delegates
 PCA/neighbors/UMAP to scanpy and velocity stream visualization to scVelo, while
@@ -52,7 +52,6 @@ gene phase portraits.
 python examples/tutorial.py
 python examples/run_linear_continuous_program.py
 python examples/run_branching_state_anchor.py
-python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
 python examples/prepare_trrust_mouse_dataset.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py

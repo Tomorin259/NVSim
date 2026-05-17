@@ -30,4 +30,3 @@ jobs:
         run: |
           python examples/run_mvp_linear.py
           python examples/run_mvp_branching.py
-          python examples/plot_velocity_showcase.py

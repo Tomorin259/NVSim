@@ -27,9 +27,6 @@ These are the supported example workflows.
   `alpha_source_mode="continuous_program"`.
 - `run_branching_state_anchor.py`: canonical branching-graph example for
   `alpha_source_mode="state_anchor"`.
-- `run_mvp_linear.py`: compact 20-gene path-graph smoke example.
-- `run_mvp_branching.py`: compact branching-graph smoke example with
-  continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
 - `run_sergio_ds6_dynamic_graph_stepfix.py`: canonical DS6 benchmark rerun with the corrected `step` semantics, official-style scanpy/scVelo outputs, and regulation diagnostics.
 - `run_sergio_1200g_ds3_strong_branching.py`: SERGIO 1200G DS3 benchmark runner on the unified graph-based simulator.
@@ -86,9 +83,6 @@ Current generated output groups are:
   master-program example.
 - `examples/outputs/branching_state_anchor/`: canonical branching-graph
   state-anchor example.
-- `examples/outputs/linear_20gene/`: small path-graph MVP sanity dataset.
-- `examples/outputs/branching_20gene_3master/`: small hand-built GRN
-  branching-graph dataset.
 - `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
   showcase plots.
 - `examples/outputs/trrust_mouse_small/`: external TRRUST benchmark outputs.

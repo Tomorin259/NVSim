@@ -149,6 +149,29 @@ def test_observed_phase_portrait_uses_observed_layers():
     assert np.allclose(offsets[:, 1], result["layers"]["unspliced"][:, 0])
 
 
+def test_phase_portrait_accepts_explicit_layers_and_color_key():
+    result = _linear_result()
+    adata = to_anndata(result)
+    adata.obs["clusters"] = pd.Categorical(["c0"] * adata.n_obs)
+    adata.uns["clusters_colors"] = ["#1f77b4"]
+
+    fig, ax = plt.subplots()
+    ax = plot_phase_portrait(
+        adata,
+        "g0",
+        ax=ax,
+        layer_s="true_spliced",
+        layer_u="true_unspliced",
+        layer_v_s="true_velocity",
+        layer_v_u="true_velocity_u",
+        color_key="clusters",
+    )
+    plt.close(fig)
+
+    assert ax.get_xlabel() == "Spliced (true_spliced)"
+    assert ax.get_ylabel() == "Unspliced (true_unspliced)"
+
+
 def test_phase_gallery_and_gene_dynamics_save_files(tmp_path: Path):
     result = _linear_result()
     paths = [

@@ -19,6 +19,8 @@ import matplotlib
 
 matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from sklearn.neighbors import NearestNeighbors
 
 from .output import to_anndata
 
@@ -385,6 +387,65 @@ def plot_gene_dynamics_over_pseudotime(data: Any, gene: str | int, output_path: 
     return plot_gene_dynamics(data, [gene], output_path=output_path, **kwargs)
 
 
+
+def _sample_phase_portrait_indices(
+    points: np.ndarray,
+    *,
+    step: tuple[int, int] = (30, 30),
+    percentile: float = 15.0,
+    jitter_scale: float = 0.15,
+    kernel_sigma: float = 0.5,
+    random_state: int = 10,
+) -> np.ndarray:
+    """Select representative phase-portrait anchor points on a coarse grid.
+
+    This is a repository-local port of the public example helper previously
+    imported from an external private path. The sampler perturbs a regular grid,
+    snaps grid points to nearby observations, and filters anchors in low-density
+    regions.
+    """
+
+    coords = np.asarray(points, dtype=float)
+    if coords.ndim != 2 or coords.shape[1] != 2:
+        raise ValueError("points must be a 2D array with exactly two columns")
+    n_obs = coords.shape[0]
+    if n_obs == 0:
+        return np.array([], dtype=int)
+    if n_obs == 1:
+        return np.array([0], dtype=int)
+
+    grids: list[np.ndarray] = []
+    for dim, n_steps in enumerate(step):
+        lower = float(np.min(coords[:, dim]))
+        upper = float(np.max(coords[:, dim]))
+        pad = 0.025 * abs(upper - lower)
+        if pad == 0.0:
+            pad = 0.025
+        grids.append(np.linspace(lower - pad, upper + pad, int(n_steps)))
+
+    mesh = np.meshgrid(*grids)
+    grid_points = np.vstack([axis.ravel() for axis in mesh]).T
+    rng = np.random.default_rng(random_state)
+    grid_points = grid_points + rng.normal(loc=0.0, scale=jitter_scale, size=grid_points.shape)
+
+    first_k = min(max(n_obs - 1, 1), 20)
+    nn = NearestNeighbors()
+    nn.fit(coords)
+    _, neighbor_ix = nn.kneighbors(grid_points, first_k)
+    chosen = np.unique(neighbor_ix[:, 0].ravel())
+    if chosen.size == 0:
+        return np.array([], dtype=int)
+
+    second_k = min(max(n_obs - 1, 1), 20)
+    nn = NearestNeighbors()
+    nn.fit(coords)
+    distances, _ = nn.kneighbors(coords[chosen], second_k)
+
+    density = np.exp(-(distances**2) / (2.0 * kernel_sigma**2)) / np.sqrt(2.0 * np.pi * kernel_sigma**2)
+    density = density.sum(axis=1)
+    keep = density > np.percentile(density, percentile)
+    return chosen[keep]
+
 def plot_phase_portrait_gallery(*args, **kwargs):
     """Backward-compatible wrapper around ``plot_phase_gallery``."""
 
@@ -422,58 +483,129 @@ def plot_phase_portrait(
     color_by: str = "pseudotime",
     show_velocity: bool = True,
     arrow_stride: int | None = None,
+    *,
+    layer_s: str | None = None,
+    layer_u: str | None = None,
+    layer_v_s: str | None = None,
+    layer_v_u: str | None = None,
+    color_key: str | None = None,
+    s: float = 18,
+    alpha: float = 0.82,
+    arrow_grid: tuple[int, int] = (30, 30),
+    legend_loc: str | None = "upper right",
+    velocity_percentile: float = 15.0,
+    velocity_color: str = "k",
+    velocity_width: float = 0.002,
+    velocity_headwidth: float = 4.5,
+    velocity_headlength: float = 5.0,
+    velocity_headaxislength: float = 4.5,
+    show_anchor_points: bool = True,
 ):
-    """Plot a gene phase portrait with true 2D RNA velocity arrows.
+    """Plot a gene phase portrait with optional 2D RNA velocity arrows.
 
-    The x-axis is spliced RNA and the y-axis is unspliced RNA. For true layers,
-    arrows use ``dx=true_velocity=ds/dt`` and ``dy=true_velocity_u=du/dt``.
+    The public API supports both the original NVSim ``mode=`` interface and the
+    more explicit layer-based interface used by DS6 example workflows.
     """
 
     adata = _as_anndata(data, copy=True)
     names = [str(name) for name in adata.var_names]
     idx = int(gene) if isinstance(gene, int) else names.index(str(gene))
-    s, u, ds, du = _phase_layers(adata, mode=mode)
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(4.2, 3.8))
+    gene_name = names[idx]
+
+    if layer_s is None or layer_u is None:
+        s_mat, u_mat, ds_mat, du_mat = _phase_layers(adata, mode=mode)
+        if layer_s is None:
+            layer_s = "true_spliced" if mode == "true" else "spliced"
+        if layer_u is None:
+            layer_u = "true_unspliced" if mode == "true" else "unspliced"
+        if layer_v_s is None:
+            layer_v_s = "true_velocity" if "true_velocity" in adata.layers else "velocity"
+        if layer_v_u is None and du_mat is not None:
+            layer_v_u = "true_velocity_u"
+    else:
+        s_mat = _require_layer(adata, layer_s)
+        u_mat = _require_layer(adata, layer_u)
+        ds_mat = _require_layer(adata, layer_v_s) if layer_v_s and layer_v_s in adata.layers else None
+        du_mat = _require_layer(adata, layer_v_u) if layer_v_u and layer_v_u in adata.layers else None
+
+    S = np.asarray(s_mat[:, idx], dtype=float)
+    U = np.asarray(u_mat[:, idx], dtype=float)
+    V_S = np.asarray(ds_mat[:, idx], dtype=float) if ds_mat is not None else np.zeros_like(S)
+    V_U = np.asarray(du_mat[:, idx], dtype=float) if du_mat is not None else np.zeros_like(U)
+
+    color_field = color_key if color_key is not None else color_by
+
+    created_fig = ax is None
+    if created_fig:
+        fig, ax = plt.subplots(figsize=(4.6, 4.0))
     else:
         fig = ax.figure
-    if color_by in adata.obs:
-        values = adata.obs[color_by].to_numpy()
-        if pd.api.types.is_numeric_dtype(adata.obs[color_by]):
-            pts = ax.scatter(s[:, idx], u[:, idx], c=values.astype(float), cmap="viridis", s=18, alpha=0.82)
-            fig.colorbar(pts, ax=ax, label=color_by)
+
+    if color_field and color_field in adata.obs:
+        series = adata.obs[color_field]
+        if pd.api.types.is_numeric_dtype(series):
+            scatter = ax.scatter(S, U, c=series.to_numpy(dtype=float), cmap="viridis", s=s, alpha=alpha, edgecolors="none")
+            if created_fig:
+                fig.colorbar(scatter, ax=ax, label=color_field)
         else:
-            cats = adata.obs[color_by].astype(str).to_numpy()
-            for category in pd.unique(cats):
-                mask = cats == category
-                ax.scatter(s[mask, idx], u[mask, idx], s=18, alpha=0.82, label=category)
-            ax.legend(frameon=False, fontsize=8)
+            labels = series.astype(str)
+            if hasattr(series, "cat"):
+                ordered = [str(v) for v in series.cat.categories if str(v) in set(labels)]
+            else:
+                ordered = [str(v) for v in pd.unique(labels)]
+            palette = adata.uns.get(f"{color_field}_colors")
+            if palette is None and color_field == "state":
+                palette = adata.uns.get("state_colors")
+            if palette is None and color_field == "clusters":
+                palette = adata.uns.get("clusters_colors")
+            if palette is None:
+                cmap = plt.get_cmap("tab20", max(len(ordered), 1))
+                color_map = {cat: cmap(i) for i, cat in enumerate(ordered)}
+            else:
+                color_map = {cat: palette[i] if i < len(palette) else "grey" for i, cat in enumerate(ordered)}
+            colors = [color_map[str(label)] for label in labels]
+            ax.scatter(S, U, c=colors, s=s, alpha=alpha, edgecolors="none")
+            if legend_loc:
+                handles = [Line2D([0], [0], marker="o", color="w", label=cat, markerfacecolor=color_map[cat], markersize=8) for cat in ordered]
+                ax.legend(handles=handles, loc=legend_loc, bbox_to_anchor=(1.05, 1), frameon=False)
     else:
-        ax.scatter(s[:, idx], u[:, idx], s=18, alpha=0.82)
-    if show_velocity and du is not None:
-        order = np.argsort(adata.obs["pseudotime"].to_numpy(dtype=float)) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
-        stride = arrow_stride or max(1, len(order) // 30)
-        q_idx = order[::stride]
-        ax.quiver(
-            s[q_idx, idx],
-            u[q_idx, idx],
-            ds[q_idx, idx],
-            du[q_idx, idx],
-            angles="xy",
-            scale_units="xy",
-            scale=1.0,
-            width=0.003,
-            color="0.25",
-            alpha=0.6,
-        )
-    ax.set_title(f"Phase portrait: {names[idx]}")
-    ax.set_xlabel("spliced RNA")
-    ax.set_ylabel("unspliced RNA")
+        ax.scatter(S, U, c="#95D9EF", s=s, alpha=alpha, edgecolors="none")
+
+    if show_velocity:
+        if arrow_stride is not None:
+            order = np.argsort(adata.obs["pseudotime"].to_numpy(dtype=float)) if "pseudotime" in adata.obs else np.arange(adata.n_obs)
+            arrow_ix = order[:: max(1, int(arrow_stride))]
+        else:
+            arrow_ix = _sample_phase_portrait_indices(np.column_stack([U, S]), step=arrow_grid, percentile=velocity_percentile)
+        if arrow_ix.size > 0:
+            if show_anchor_points:
+                ax.scatter(S[arrow_ix], U[arrow_ix], color="none", edgecolor=velocity_color, s=s, linewidth=0.8, zorder=19)
+            ax.quiver(
+                S[arrow_ix],
+                U[arrow_ix],
+                V_S[arrow_ix],
+                V_U[arrow_ix],
+                angles="xy",
+                scale_units="xy",
+                scale=None,
+                color=velocity_color,
+                width=velocity_width,
+                headwidth=velocity_headwidth,
+                headlength=velocity_headlength,
+                headaxislength=velocity_headaxislength,
+                alpha=1.0,
+                zorder=20,
+            )
+
+    ax.set_xlabel(f"Spliced ({layer_s})")
+    ax.set_ylabel(f"Unspliced ({layer_u})")
+    ax.set_title(f"Gene: {gene_name}")
+
     if output_path is not None:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=180, bbox_inches="tight")
-    return fig
+    return fig if created_fig else ax
 
 
 def plot_phase_gallery(

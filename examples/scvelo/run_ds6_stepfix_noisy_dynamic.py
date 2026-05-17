@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -22,9 +21,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from nvsim.plotting import plot_phase_portrait
+
 INPUT_H5AD = ROOT / "examples" / "outputs" / "ds6_pt_s3_c300_stepfix" / "obs_compare_tuned" / "ds6_stepfix_obs_noisy_raw.h5ad"
 RESULTS_DIR = ROOT / "examples" / "scvelo" / "results" / "ds6_stepfix_obs_noisy_scvelo_dynamical"
-UTILS_PATH = Path("/mnt/second19T/zhaozelin/velocity/plot/gene_to_use/utils.py")
 STATE_ORDER = ["bin_0", "bin_1", "bin_2", "bin_3", "bin_4", "bin_5"]
 STATE_COLORS = {
     "bin_0": "#4E79A7",
@@ -44,14 +44,6 @@ SCV_DYN_PARAMS = {
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="scvelo")
 warnings.filterwarnings("ignore", message="is_categorical_dtype is deprecated*", category=DeprecationWarning)
 
-
-def _load_plot_phase_portrait():
-    spec = importlib.util.spec_from_file_location("gene_to_use_utils", UTILS_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"failed to load plotting utils from {UTILS_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.plot_phase_portrait
 
 
 def _prepare() -> ad.AnnData:
@@ -118,7 +110,7 @@ def _plot_umap(adata: ad.AnnData) -> list[str]:
     return paths
 
 
-def _plot_phase_pages(adata: ad.AnnData, plot_phase_portrait) -> list[str]:
+def _plot_phase_pages(adata: ad.AnnData) -> list[str]:
     genes = list(map(str, adata.var_names[:100]))
     page_paths = []
     for page_idx in range(4):
@@ -171,14 +163,13 @@ def _summary(adata: ad.AnnData, stream_path: str, umap_paths: list[str], phase_p
 
 def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    plot_phase_portrait = _load_plot_phase_portrait()
     adata = _prepare()
     adata = _run_dynamical(adata)
     if "latent_time" not in adata.obs:
         scv.tl.latent_time(adata)
     stream_path = _plot_stream(adata)
     umap_paths = _plot_umap(adata)
-    phase_paths = _plot_phase_pages(adata, plot_phase_portrait)
+    phase_paths = _plot_phase_pages(adata)
     out_h5ad = RESULTS_DIR / "ds6_stepfix_obs_noisy_scvelo_dynamical.h5ad"
     adata.write_h5ad(out_h5ad)
     summary = _summary(adata, stream_path, umap_paths, phase_paths)

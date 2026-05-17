@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -24,10 +23,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from nvsim.noise import generate_observed_counts
+from nvsim.plotting import plot_phase_portrait
 
 INPUT_H5AD = ROOT / "examples" / "outputs" / "ds6_pt_s3_c300_stepfix" / "ds6_stepfix_clean_simulation.h5ad"
 OUTPUT_DIR = ROOT / "examples" / "outputs" / "ds6_pt_s3_c300_stepfix" / "obs_compare_tuned"
-UTILS_PATH = Path("/mnt/second19T/zhaozelin/velocity/plot/gene_to_use/utils.py")
 STATE_ORDER = ["bin_0", "bin_1", "bin_2", "bin_3", "bin_4", "bin_5"]
 STATE_COLORS = {
     "bin_0": "#4E79A7",
@@ -82,14 +81,6 @@ CLEAN_ARROW_STYLE = {
 }
 
 
-def _load_plot_phase_portrait():
-    spec = importlib.util.spec_from_file_location("gene_to_use_utils", UTILS_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"failed to load plotting utils from {UTILS_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.plot_phase_portrait
-
 
 def _base_obs(src: ad.AnnData) -> pd.DataFrame:
     obs = src.obs.copy()
@@ -134,7 +125,7 @@ def _tune_clean_quiver(ax):
             artist.headaxislength = CLEAN_ARROW_STYLE["headaxislength"]
 
 
-def _plot_phase_pages(adata: ad.AnnData, *, out_prefix: str, tune_clean_arrows: bool, plot_phase_portrait) -> list[str]:
+def _plot_phase_pages(adata: ad.AnnData, *, out_prefix: str, tune_clean_arrows: bool) -> list[str]:
     genes = list(map(str, adata.var_names[:100]))
     page_paths: list[str] = []
     for page_idx in range(4):
@@ -260,7 +251,6 @@ def _nearest_summary(adata: ad.AnnData) -> dict[str, list[list[object]]]:
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    plot_phase_portrait = _load_plot_phase_portrait()
     src = ad.read_h5ad(INPUT_H5AD)
 
     clean_raw = _new_adata(
@@ -299,8 +289,8 @@ def main() -> None:
     clean.write_h5ad(clean_moments_path)
     noisy.write_h5ad(noisy_moments_path)
 
-    clean_pages = _plot_phase_pages(clean, out_prefix="phase_clean_scvelo_moments", tune_clean_arrows=True, plot_phase_portrait=plot_phase_portrait)
-    noisy_pages = _plot_phase_pages(noisy, out_prefix="phase_noisy_scvelo_moments", tune_clean_arrows=False, plot_phase_portrait=plot_phase_portrait)
+    clean_pages = _plot_phase_pages(clean, out_prefix="phase_clean_scvelo_moments", tune_clean_arrows=True)
+    noisy_pages = _plot_phase_pages(noisy, out_prefix="phase_noisy_scvelo_moments", tune_clean_arrows=False)
 
     clean_total = np.asarray(src.layers["true_spliced"]) + np.asarray(src.layers["true_unspliced"])
     noisy_total = np.asarray(noisy_layers["spliced"]) + np.asarray(noisy_layers["unspliced"])

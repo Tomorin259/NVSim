@@ -57,11 +57,11 @@ placeholder threshold value.
 
 From the repository root:
 
-python scripts/prepare_trrust_mouse_dataset.py
+python examples/prepare_trrust_mouse_dataset.py
 
 Or with a local TRRUST TSV:
 
-python scripts/prepare_trrust_mouse_dataset.py --trrust_tsv /path/to/trrust_rawdata.mouse.tsv
+python examples/prepare_trrust_mouse_dataset.py --trrust_tsv /path/to/trrust_rawdata.mouse.tsv
 
 ## Example Simulation
 

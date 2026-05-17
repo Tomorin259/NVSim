@@ -22,6 +22,7 @@ These are the supported example workflows.
 
 ### Data generation
 
+- `prepare_trrust_mouse_dataset.py`: prepares the external TRRUST mouse signed-GRN benchmark dataset under `data/external/trrust_mouse/`.
 - `run_linear_continuous_program.py`: canonical path-graph example for
   `alpha_source_mode="continuous_program"`.
 - `run_branching_state_anchor.py`: canonical branching-graph example for
@@ -31,6 +32,7 @@ These are the supported example workflows.
   continuous master-regulator programs.
 - `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
 - `run_sergio_ds6_dynamic_graph_stepfix.py`: canonical DS6 benchmark rerun with the corrected `step` semantics, official-style scanpy/scVelo outputs, and regulation diagnostics.
+- `run_sergio_1200g_ds3_strong_branching.py`: SERGIO 1200G DS3 benchmark runner on the unified graph-based simulator.
 - `run_ds6_stepfix_observation_compare.py`: clean vs tuned-noisy DS6 observation comparison with scVelo moments phase portraits and total-expression UMAPs.
 
 ### Plotting
@@ -52,7 +54,9 @@ python examples/run_linear_continuous_program.py
 python examples/run_branching_state_anchor.py
 python examples/plot_velocity_showcase.py
 python examples/run_trrust_mouse_small.py
+python examples/prepare_trrust_mouse_dataset.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
+python examples/run_sergio_1200g_ds3_strong_branching.py
 python examples/run_ds6_stepfix_observation_compare.py
 ```
 

@@ -5,7 +5,7 @@ import io
 import pandas as pd
 
 from nvsim.production import StateProductionProfile
-from scripts.prepare_trrust_mouse_dataset import (
+from examples.prepare_trrust_mouse_dataset import (
     STANDARD_COLUMNS,
     build_signed_full_grn,
     build_small_benchmark_grn,

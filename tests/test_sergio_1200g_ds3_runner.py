@@ -4,7 +4,7 @@ import pandas as pd
 
 from nvsim.modes import branching_graph, path_graph
 from nvsim.production import StateProductionProfile
-from scripts import sergio_1200g_ds3_strong_branching as runner
+from examples import run_sergio_1200g_ds3_strong_branching as runner
 
 
 def _profile() -> StateProductionProfile:

@@ -210,11 +210,9 @@ Recommended entry points:
 
 ```bash
 python examples/tutorial.py
-python examples/run_linear_continuous_program.py
-python examples/run_branching_state_anchor.py
-python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
 python examples/run_ds6_stepfix_observation_compare.py
+python examples/scvelo/run_ds6_stepfix_noisy_dynamic.py
 ```
 
 See [Alpha Source Modes](docs/alpha_source_modes.md) for formulas and examples.
@@ -423,11 +421,9 @@ result = simulate(
 
 ```bash
 python examples/tutorial.py
-python examples/run_linear_continuous_program.py
-python examples/run_branching_state_anchor.py
-python examples/run_trrust_mouse_small.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
 python examples/run_ds6_stepfix_observation_compare.py
+python examples/scvelo/run_ds6_stepfix_noisy_dynamic.py
 ```
 
 详细公式和示例见 [Alpha Source Modes](docs/alpha_source_modes.md)。

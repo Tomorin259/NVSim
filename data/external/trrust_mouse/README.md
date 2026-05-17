@@ -53,16 +53,6 @@ The example simulation then uses the NVSim runtime calibration path with
 auto_calibrate_half_response=True so the benchmark is not locked to the
 placeholder threshold value.
 
-## How To Build
+## Historical Note
 
-From the repository root:
-
-python examples/prepare_trrust_mouse_dataset.py
-
-Or with a local TRRUST TSV:
-
-python examples/prepare_trrust_mouse_dataset.py --trrust_tsv /path/to/trrust_rawdata.mouse.tsv
-
-## Example Simulation
-
-python examples/run_trrust_mouse_small.py
+The TRRUST preparation and small-benchmark example workflows were removed from the public examples directory when the repository was reduced to the tutorial + DS6-focused public entrypoints. The data files remain here only as historical benchmark artifacts.

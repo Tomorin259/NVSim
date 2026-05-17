@@ -18,42 +18,22 @@ change set.
 
 ## Core Examples
 
-These are the supported example workflows.
+These are the supported public example workflows.
 
-### Data generation
+### Core entrypoints
 
-- `prepare_trrust_mouse_dataset.py`: prepares the external TRRUST mouse signed-GRN benchmark dataset under `data/external/trrust_mouse/`.
-- `run_linear_continuous_program.py`: canonical path-graph example for
-  `alpha_source_mode="continuous_program"`.
-- `run_branching_state_anchor.py`: canonical branching-graph example for
-  `alpha_source_mode="state_anchor"`.
-- `run_trrust_mouse_small.py`: external TRRUST signed-GRN benchmark example.
+- `tutorial.py`: the canonical end-to-end tutorial for the current public API.
 - `run_sergio_ds6_dynamic_graph_stepfix.py`: canonical DS6 benchmark rerun with the corrected `step` semantics, official-style scanpy/scVelo outputs, and regulation diagnostics.
-- `run_sergio_1200g_ds3_strong_branching.py`: SERGIO 1200G DS3 benchmark runner on the unified graph-based simulator.
 - `run_ds6_stepfix_observation_compare.py`: clean vs tuned-noisy DS6 observation comparison with scVelo moments phase portraits and total-expression UMAPs.
-
-### Plotting
-
-There is no longer a standalone plotting-only entrypoint under `examples/`.
-Plotting is exercised through the benchmark/example runners and through the
-public `nvsim.plotting` module itself.
-
-`nvsim.plotting` is the single public plotting module. It delegates
-PCA/neighbors/UMAP to scanpy and velocity stream visualization to scVelo, while
-keeping NVSim-specific diagnostics such as gene dynamics and two-dimensional
-gene phase portraits.
+- `scvelo/run_ds6_stepfix_noisy_dynamic.py`: downstream scVelo dynamical workflow starting from the canonical DS6 noisy raw counts.
 
 ## Recommended Check Commands
 
 ```bash
 python examples/tutorial.py
-python examples/run_linear_continuous_program.py
-python examples/run_branching_state_anchor.py
-python examples/run_trrust_mouse_small.py
-python examples/prepare_trrust_mouse_dataset.py
 python examples/run_sergio_ds6_dynamic_graph_stepfix.py
-python examples/run_sergio_1200g_ds3_strong_branching.py
 python examples/run_ds6_stepfix_observation_compare.py
+python examples/scvelo/run_ds6_stepfix_noisy_dynamic.py
 ```
 
 ## Output Naming
@@ -75,20 +55,11 @@ Plot files follow the same rule:
 - `umap_*_total_*.png`: total-expression UMAPs.
 - `umap_scvelo_*.png`: scVelo dynamical UMAPs and stream plots.
 
-
 Current generated output groups are:
 
-- `examples/outputs/tutorial/`: tutorial path-graph and branching-graph outputs.
-- `examples/outputs/linear_continuous_program/`: canonical path-graph continuous
-  master-program example.
-- `examples/outputs/branching_state_anchor/`: canonical branching-graph
-  state-anchor example.
-- `examples/outputs/velocity_showcase/`: scanpy/scVelo velocity-style
-  showcase plots.
-- `examples/outputs/trrust_mouse_small/`: external TRRUST benchmark outputs.
+- `examples/outputs/tutorial/`: tutorial outputs.
 - `examples/outputs/ds6_pt_s3_c300_stepfix/`: canonical DS6 benchmark rerun with corrected `step` transitions and full diagnostics.
 - `examples/outputs/ds6_pt_s3_c300_stepfix/obs_compare_tuned/`: canonical clean vs tuned-noisy observation comparison for DS6 stepfix.
-- `examples/outputs/ds6_pt_s3_c300_stepfix_kinsergio/`: the same benchmark with fixed SERGIO kinetics for controlled comparison.
 
 ## DS6 Canonical vs Legacy
 

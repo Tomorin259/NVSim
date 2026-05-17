@@ -64,8 +64,8 @@ def make_result_dict(
     true_velocity: np.ndarray,
     velocity_u: np.ndarray,
     true_alpha: np.ndarray,
-    observed_unspliced: np.ndarray,
-    observed_spliced: np.ndarray,
+    observed_unspliced: np.ndarray | None,
+    observed_spliced: np.ndarray | None,
     obs: pd.DataFrame,
     var: pd.DataFrame,
     grn: GRN,
@@ -74,28 +74,24 @@ def make_result_dict(
     simulation_config: Any = None,
     grn_calibration: Any = None,
     noise_config: Any = None,
+    observation_config: Any = None,
     time_grid: pd.DataFrame | None = None,
     edge_contributions: np.ndarray | None = None,
     edge_metadata: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
-    """创建模拟器默认返回的 plain dict。
-
-    layers 中保存 observed 和 true 矩阵：
-    ``unspliced/spliced`` 是带噪声观测层；
-    ``true_unspliced/true_spliced`` 是真实状态；
-    ``true_velocity`` 是 ds/dt；``true_velocity_u`` 是 du/dt；
-    ``true_alpha`` 是 GRN 计算得到的 transcription rate。
-    """
+    """创建模拟器默认返回的 plain dict。"""
 
     layers = {
-        "unspliced": np.asarray(observed_unspliced).copy(),
-        "spliced": np.asarray(observed_spliced).copy(),
         "true_unspliced": np.asarray(true_unspliced).copy(),
         "true_spliced": np.asarray(true_spliced).copy(),
         "true_velocity": np.asarray(true_velocity).copy(),
         "true_velocity_u": np.asarray(velocity_u).copy(),
         "true_alpha": np.asarray(true_alpha).copy(),
     }
+    if observed_unspliced is not None:
+        layers["unspliced"] = np.asarray(observed_unspliced).copy()
+    if observed_spliced is not None:
+        layers["spliced"] = np.asarray(observed_spliced).copy()
     _validate_layer_shapes(layers, n_obs=obs.shape[0], n_vars=var.shape[0])
 
     result = {
@@ -108,6 +104,7 @@ def make_result_dict(
             "simulation_config": _plain_config(simulation_config),
             "grn_calibration": _plain_config(grn_calibration),
             "noise_config": _plain_config(noise_config),
+            "observation_config": _plain_config(observation_config),
         },
         "time_grid": None if time_grid is None else time_grid.copy(),
     }
@@ -120,12 +117,7 @@ def make_result_dict(
 
 
 def to_anndata(result: dict[str, Any]):
-    """把 NVSim result dict 转成 AnnData。
-
-    AnnData 中 ``X`` 默认使用 observed spliced；所有 true/observed 矩阵
-    都写入 ``adata.layers``，GRN、kinetic parameters 和 simulation config
-    写入 ``adata.uns``。
-    """
+    """把 NVSim result dict 转成 AnnData。"""
 
     try:
         import anndata as ad
@@ -133,7 +125,8 @@ def to_anndata(result: dict[str, Any]):
         raise ImportError("anndata is not installed; use the plain dictionary output instead") from exc
 
     layers = result["layers"]
-    adata = ad.AnnData(X=layers["spliced"], obs=result["obs"].copy(), var=result["var"].copy())
+    x_layer = layers["spliced"] if "spliced" in layers else layers["true_spliced"]
+    adata = ad.AnnData(X=x_layer, obs=result["obs"].copy(), var=result["var"].copy())
     for name in (
         "unspliced",
         "spliced",
@@ -143,12 +136,14 @@ def to_anndata(result: dict[str, Any]):
         "true_velocity_u",
         "true_alpha",
     ):
-        adata.layers[name] = layers[name]
+        if name in layers:
+            adata.layers[name] = layers[name]
     adata.uns["true_grn"] = _anndata_safe(result["uns"]["true_grn"])
     adata.uns["kinetic_params"] = _anndata_safe(result["uns"]["kinetic_params"])
     adata.uns["simulation_config"] = _anndata_safe(result["uns"]["simulation_config"])
     adata.uns["grn_calibration"] = _anndata_safe(result["uns"]["grn_calibration"])
-    adata.uns["noise_config"] = _anndata_safe(result["uns"]["noise_config"])
+    adata.uns["noise_config"] = _anndata_safe(result["uns"].get("noise_config", {}))
+    adata.uns["observation_config"] = _anndata_safe(result["uns"].get("observation_config", {}))
     if "edge_contributions" in result:
         adata.obsm["edge_contributions"] = np.asarray(result["edge_contributions"]).copy()
         adata.uns["edge_metadata"] = _anndata_safe(result["uns"]["edge_metadata"])

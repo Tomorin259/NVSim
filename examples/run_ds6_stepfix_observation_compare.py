@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from nvsim.noise import generate_observed_counts
+from nvsim.noise import apply_observation
 from nvsim.plotting import plot_phase_portrait
 
 INPUT_H5AD = ROOT / "examples" / "outputs" / "ds6_pt_s3_c300_stepfix" / "ds6_stepfix_clean_simulation.h5ad"
@@ -87,21 +87,6 @@ def _base_obs(src: ad.AnnData) -> pd.DataFrame:
     obs["state"] = pd.Categorical(obs["state"].astype(str), categories=STATE_ORDER, ordered=True)
     obs["bin"] = obs["state"].astype(str)
     return obs
-
-
-def _new_adata(src: ad.AnnData, *, spliced: np.ndarray, unspliced: np.ndarray, capture_efficiency: np.ndarray | None = None) -> ad.AnnData:
-    adata = ad.AnnData(X=np.asarray(spliced, dtype=float).copy())
-    adata.obs = _base_obs(src)
-    if capture_efficiency is not None:
-        adata.obs["capture_efficiency"] = np.asarray(capture_efficiency, dtype=float)
-    adata.var = src.var.copy()
-    adata.var_names = src.var_names.copy()
-    adata.layers["spliced"] = np.asarray(spliced, dtype=float).copy()
-    adata.layers["unspliced"] = np.asarray(unspliced, dtype=float).copy()
-    adata.layers["true_velocity"] = np.asarray(src.layers["true_velocity"], dtype=float).copy()
-    adata.layers["true_velocity_u"] = np.asarray(src.layers["true_velocity_u"], dtype=float).copy()
-    adata.uns["state_colors"] = [STATE_COLORS[s] for s in STATE_ORDER]
-    return adata
 
 
 def _prepare_scvelo(adata: ad.AnnData) -> ad.AnnData:
@@ -253,27 +238,25 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     src = ad.read_h5ad(INPUT_H5AD)
 
-    clean_raw = _new_adata(
+    clean_raw = apply_observation(
         src,
-        spliced=np.asarray(src.layers["true_spliced"]),
-        unspliced=np.asarray(src.layers["true_unspliced"]),
+        seed=0,
+        count_model="poisson",
+        cell_capture_mode="constant",
+        cell_capture_mean=1.0,
+        observation_sample=False,
+        dropout_mode="off",
     )
-    noisy_layers = generate_observed_counts(
-        np.asarray(src.layers["true_unspliced"]),
-        np.asarray(src.layers["true_spliced"]),
+    noisy_raw = apply_observation(
+        src,
         seed=NOISE_PARAMS["seed"],
-        capture_rate=NOISE_PARAMS["capture_rate"],
-        poisson=NOISE_PARAMS["poisson"],
+        count_model="poisson",
+        cell_capture_mode="lognormal",
+        cell_capture_mean=NOISE_PARAMS["capture_rate"],
+        cell_capture_cv=NOISE_PARAMS["capture_efficiency_cv"],
+        observation_sample=NOISE_PARAMS["poisson"],
+        dropout_mode="off" if NOISE_PARAMS["dropout_rate"] == 0.0 else "bernoulli",
         dropout_rate=NOISE_PARAMS["dropout_rate"],
-        capture_model=NOISE_PARAMS["capture_model"],
-        capture_efficiency_mode=NOISE_PARAMS["capture_efficiency_mode"],
-        capture_efficiency_cv=NOISE_PARAMS["capture_efficiency_cv"],
-    )
-    noisy_raw = _new_adata(
-        src,
-        spliced=noisy_layers["spliced"],
-        unspliced=noisy_layers["unspliced"],
-        capture_efficiency=noisy_layers["capture_efficiency"],
     )
 
     clean_raw_path = OUTPUT_DIR / "ds6_stepfix_obs_clean_raw.h5ad"
@@ -293,7 +276,7 @@ def main() -> None:
     noisy_pages = _plot_phase_pages(noisy, out_prefix="phase_noisy_scvelo_moments", tune_clean_arrows=False)
 
     clean_total = np.asarray(src.layers["true_spliced"]) + np.asarray(src.layers["true_unspliced"])
-    noisy_total = np.asarray(noisy_layers["spliced"]) + np.asarray(noisy_layers["unspliced"])
+    noisy_total = np.asarray(noisy_raw.layers["spliced"]) + np.asarray(noisy_raw.layers["unspliced"])
     clean_umap = _prepare_total_umap(src, total=clean_total)
     noisy_umap = _prepare_total_umap(src, total=noisy_total)
     clean_umap_path = OUTPUT_DIR / "ds6_stepfix_obs_clean_total_umap.h5ad"

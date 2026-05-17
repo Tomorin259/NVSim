@@ -1,11 +1,17 @@
-"""Observed-count generation for lightweight capture-noise models."""
+"""Observed-count generation and observation-layer application helpers."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
+import pandas as pd
 
 CANONICAL_CAPTURE_MODELS = ("poisson_capture", "binomial_capture")
 CANONICAL_CAPTURE_EFFICIENCY_MODES = ("constant", "cell_lognormal")
+CANONICAL_COUNT_MODELS = ("poisson", "binomial")
+CANONICAL_CELL_CAPTURE_MODES = ("constant", "lognormal")
+CANONICAL_DROPOUT_MODES = ("off", "bernoulli")
 
 
 def _valid_capture_model_message() -> str:
@@ -82,6 +88,98 @@ def _sample_capture_efficiency(
     return np.clip(sampled, 0.0, 1.0)
 
 
+def _resolve_count_model(count_model: str | None) -> str:
+    if count_model is None:
+        return "poisson"
+    if count_model in CANONICAL_COUNT_MODELS:
+        return count_model
+    raise ValueError("count_model must be one of 'poisson' or 'binomial'")
+
+
+def _resolve_cell_capture_mode(cell_capture_mode: str | None) -> str:
+    if cell_capture_mode is None:
+        return "constant"
+    if cell_capture_mode in CANONICAL_CELL_CAPTURE_MODES:
+        return cell_capture_mode
+    raise ValueError("cell_capture_mode must be one of 'constant' or 'lognormal'")
+
+
+def _resolve_dropout_mode(dropout_mode: str | None) -> str:
+    if dropout_mode is None:
+        return "off"
+    if dropout_mode in CANONICAL_DROPOUT_MODES:
+        return dropout_mode
+    raise ValueError("dropout_mode must be one of 'off' or 'bernoulli'")
+
+
+def _canonical_capture_model_from_count_model(count_model: str) -> str:
+    if count_model == "poisson":
+        return "poisson_capture"
+    if count_model == "binomial":
+        return "binomial_capture"
+    raise ValueError(f"unsupported count_model {count_model!r}")
+
+
+def _canonical_capture_efficiency_mode_from_cell_capture_mode(cell_capture_mode: str) -> str:
+    if cell_capture_mode == "constant":
+        return "constant"
+    if cell_capture_mode == "lognormal":
+        return "cell_lognormal"
+    raise ValueError(f"unsupported cell_capture_mode {cell_capture_mode!r}")
+
+
+def _resolve_observation_kwargs(
+    *,
+    count_model: str | None,
+    cell_capture_mode: str | None,
+    cell_capture_mean: float | None,
+    cell_capture_cv: float,
+    dropout_mode: str | None,
+    dropout_rate: float,
+    observation_sample: bool,
+    capture_model: str | None,
+    capture_rate: float | None,
+    capture_efficiency_mode: str | None,
+    capture_efficiency_cv: float | None,
+    poisson: bool | None,
+) -> dict[str, Any]:
+    if capture_model is not None:
+        count_model = {
+            "poisson_capture": "poisson",
+            "binomial_capture": "binomial",
+        }[_resolve_capture_model_name(capture_model)]
+    resolved_count_model = _resolve_count_model(count_model)
+
+    if capture_efficiency_mode is not None:
+        cell_capture_mode = {
+            "constant": "constant",
+            "cell_lognormal": "lognormal",
+        }[_resolve_capture_efficiency_mode(capture_efficiency_mode)]
+    resolved_cell_capture_mode = _resolve_cell_capture_mode(cell_capture_mode)
+
+    if capture_rate is not None:
+        cell_capture_mean = capture_rate
+    if capture_efficiency_cv is not None:
+        cell_capture_cv = capture_efficiency_cv
+    if poisson is not None:
+        observation_sample = bool(poisson)
+    if dropout_mode is None:
+        dropout_mode = "off" if dropout_rate == 0.0 else "bernoulli"
+    resolved_dropout_mode = _resolve_dropout_mode(dropout_mode)
+
+    return {
+        "count_model": resolved_count_model,
+        "cell_capture_mode": resolved_cell_capture_mode,
+        "cell_capture_mean": cell_capture_mean,
+        "cell_capture_cv": float(cell_capture_cv),
+        "dropout_mode": resolved_dropout_mode,
+        "dropout_rate": float(dropout_rate),
+        "observation_sample": bool(observation_sample),
+        "capture_model": _canonical_capture_model_from_count_model(resolved_count_model),
+        "capture_efficiency_mode": _canonical_capture_efficiency_mode_from_cell_capture_mode(resolved_cell_capture_mode),
+    }
+
+
 def generate_observed_counts(
     true_unspliced: object,
     true_spliced: object,
@@ -93,22 +191,7 @@ def generate_observed_counts(
     capture_efficiency_mode: str | None = "constant",
     capture_efficiency_cv: float = 0.0,
 ) -> dict[str, np.ndarray]:
-    """Generate observed unspliced/spliced layers from true latent layers.
-
-    Supported capture models:
-
-    - ``poisson_capture``: optional cell-level capture scaling, then optional Poisson sampling
-    - ``binomial_capture``: round latent molecule counts, then apply binomial capture
-
-    For ``binomial_capture``, the implementation uses
-    ``np.rint(true_counts).astype(int)`` as the latent molecule count before
-    molecule-level capture. The binomial branch does not apply an additional
-    Poisson sampling step.
-
-    If ``poisson=False`` under ``poisson_capture``, the returned observed layers
-    keep continuous values. This is useful for low-noise visualization and
-    debugging, not as a realistic UMI count model.
-    """
+    """Generate observed unspliced/spliced layers from true latent layers."""
 
     rng = np.random.default_rng(seed)
     u = np.asarray(true_unspliced, dtype=float).copy()
@@ -163,3 +246,151 @@ def generate_observed_counts(
         "spliced": observed_s,
         "capture_efficiency": capture_efficiency,
     }
+
+
+def _copy_result_dict(data: dict[str, Any]) -> dict[str, Any]:
+    copied: dict[str, Any] = {}
+    for key, value in data.items():
+        if key == "layers":
+            copied[key] = {name: np.asarray(layer).copy() for name, layer in value.items()}
+        elif key == "obs":
+            copied[key] = value.copy()
+        elif key == "var":
+            copied[key] = value.copy()
+        elif key == "uns":
+            copied[key] = dict(value)
+        elif isinstance(value, np.ndarray):
+            copied[key] = value.copy()
+        elif hasattr(value, "copy"):
+            copied[key] = value.copy()
+        else:
+            copied[key] = value
+    if "uns" not in copied:
+        copied["uns"] = {}
+    return copied
+
+
+def _build_observation_config(*, seed: int | None, resolved: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "count_model": resolved["count_model"],
+        "cell_capture_mode": resolved["cell_capture_mode"],
+        "cell_capture_mean": resolved["cell_capture_mean"],
+        "cell_capture_cv": resolved["cell_capture_cv"],
+        "observation_sample": resolved["observation_sample"],
+        "dropout_mode": resolved["dropout_mode"],
+        "dropout_rate": resolved["dropout_rate"],
+        "seed": seed,
+    }
+
+
+def _build_noise_config(observation_config: dict[str, Any], resolved: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "capture_model": resolved["capture_model"],
+        "capture_rate": observation_config["cell_capture_mean"],
+        "capture_efficiency_mode": resolved["capture_efficiency_mode"],
+        "capture_efficiency_cv": observation_config["cell_capture_cv"],
+        "poisson_observed": observation_config["observation_sample"],
+        "dropout_rate": observation_config["dropout_rate"],
+    }
+
+
+def apply_observation(
+    data: Any,
+    *,
+    count_model: str | None = "poisson",
+    cell_capture_mode: str | None = "constant",
+    cell_capture_mean: float | None = None,
+    cell_capture_cv: float = 0.0,
+    gene_dispersion_mode: str = "off",
+    gene_dispersion_strength: float = 0.0,
+    dropout_mode: str | None = "off",
+    dropout_rate: float = 0.0,
+    observation_sample: bool = True,
+    seed: int | None = 0,
+    capture_model: str | None = None,
+    capture_rate: float | None = None,
+    capture_efficiency_mode: str | None = None,
+    capture_efficiency_cv: float | None = None,
+    poisson: bool | None = None,
+):
+    """Apply the observation model to a clean simulation result or AnnData."""
+
+    if gene_dispersion_mode != "off":
+        raise NotImplementedError("gene_dispersion_mode is reserved for the next observation-layer step")
+    if gene_dispersion_strength != 0.0:
+        raise NotImplementedError("gene_dispersion_strength is reserved for the next observation-layer step")
+
+    resolved = _resolve_observation_kwargs(
+        count_model=count_model,
+        cell_capture_mode=cell_capture_mode,
+        cell_capture_mean=cell_capture_mean,
+        cell_capture_cv=cell_capture_cv,
+        dropout_mode=dropout_mode,
+        dropout_rate=dropout_rate,
+        observation_sample=observation_sample,
+        capture_model=capture_model,
+        capture_rate=capture_rate,
+        capture_efficiency_mode=capture_efficiency_mode,
+        capture_efficiency_cv=capture_efficiency_cv,
+        poisson=poisson,
+    )
+    observation_config = _build_observation_config(seed=seed, resolved=resolved)
+    noise_config = _build_noise_config(observation_config, resolved)
+
+    try:
+        import anndata as ad
+    except ImportError:
+        ad = None
+
+    if ad is not None and isinstance(data, ad.AnnData):
+        if "true_unspliced" not in data.layers or "true_spliced" not in data.layers:
+            raise ValueError("AnnData input must contain true_unspliced and true_spliced layers")
+        observed = generate_observed_counts(
+            data.layers["true_unspliced"],
+            data.layers["true_spliced"],
+            seed=seed,
+            capture_rate=observation_config["cell_capture_mean"],
+            poisson=observation_config["observation_sample"],
+            dropout_rate=observation_config["dropout_rate"],
+            capture_model=resolved["capture_model"],
+            capture_efficiency_mode=resolved["capture_efficiency_mode"],
+            capture_efficiency_cv=observation_config["cell_capture_cv"],
+        )
+        out = data.copy()
+        out.layers["unspliced"] = observed["unspliced"]
+        out.layers["spliced"] = observed["spliced"]
+        out.obs = out.obs.copy()
+        out.obs["capture_efficiency"] = observed["capture_efficiency"]
+        out.uns["observation_config"] = observation_config
+        out.uns["noise_config"] = noise_config
+        out.X = np.asarray(observed["spliced"], dtype=float).copy()
+        return out
+
+    if not isinstance(data, dict):
+        raise TypeError("apply_observation expects an NVSim result dict or AnnData input")
+    if "layers" not in data or "obs" not in data or "uns" not in data:
+        raise ValueError("result dict input must contain layers, obs, and uns")
+    layers = data["layers"]
+    if "true_unspliced" not in layers or "true_spliced" not in layers:
+        raise ValueError("result dict input must contain true_unspliced and true_spliced layers")
+
+    observed = generate_observed_counts(
+        layers["true_unspliced"],
+        layers["true_spliced"],
+        seed=seed,
+        capture_rate=observation_config["cell_capture_mean"],
+        poisson=observation_config["observation_sample"],
+        dropout_rate=observation_config["dropout_rate"],
+        capture_model=resolved["capture_model"],
+        capture_efficiency_mode=resolved["capture_efficiency_mode"],
+        capture_efficiency_cv=observation_config["cell_capture_cv"],
+    )
+
+    out = _copy_result_dict(data)
+    out["layers"]["unspliced"] = observed["unspliced"]
+    out["layers"]["spliced"] = observed["spliced"]
+    out["obs"] = out["obs"].copy()
+    out["obs"]["capture_efficiency"] = observed["capture_efficiency"]
+    out["uns"]["observation_config"] = observation_config
+    out["uns"]["noise_config"] = noise_config
+    return out

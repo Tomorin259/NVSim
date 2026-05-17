@@ -132,7 +132,8 @@ def test_branching_output_contains_standardized_metadata():
 
 def test_branching_capture_model_metadata_is_recorded():
     result = simulate(_graph_grn(), **_branching_kwargs(), capture_model="binomial_capture", capture_rate=0.5)
-    assert result["uns"]["simulation_config"]["capture_model"] == "binomial_capture"
+    assert result["uns"]["observation_config"]["count_model"] == "binomial"
+    assert result["uns"]["noise_config"]["capture_model"] == "binomial_capture"
 
 
 def test_sergio_differentiation_defaults_to_sergio_kinetics():

@@ -95,8 +95,9 @@ def test_cell_lognormal_capture_efficiency_is_recorded_in_obs_and_config():
     assert eff.shape == (12,)
     assert np.all((eff >= 0.0) & (eff <= 1.0))
     assert len(np.unique(np.round(eff, 6))) > 1
-    assert result["uns"]["simulation_config"]["capture_efficiency_mode"] == "cell_lognormal"
-    assert result["uns"]["simulation_config"]["capture_efficiency_cv"] == 0.2
+    assert result["uns"]["observation_config"]["cell_capture_mode"] == "lognormal"
+    assert result["uns"]["observation_config"]["cell_capture_cv"] == 0.2
+    assert "capture_efficiency_mode" not in result["uns"]["simulation_config"]
 
 
 def test_var_metadata_distinguishes_gene_role_from_gene_class():

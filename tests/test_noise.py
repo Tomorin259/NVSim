@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-from nvsim.noise import generate_observed_counts
+import pandas as pd
+from nvsim.noise import apply_observation, generate_observed_counts
 
 
 def test_poisson_false_returns_continuous_observed_values_without_overwriting_truth():
@@ -239,3 +240,62 @@ def test_invalid_capture_efficiency_mode_raises_clear_error():
 
     with pytest.raises(ValueError, match="capture_efficiency_mode"):
         generate_observed_counts(true_u, true_s, capture_efficiency_mode="unknown")
+
+
+
+def _tiny_clean_result():
+    return {
+        "layers": {
+            "true_unspliced": np.array([[1.0, 2.0], [3.0, 4.0]], dtype=float),
+            "true_spliced": np.array([[5.0, 6.0], [7.0, 8.0]], dtype=float),
+            "true_velocity": np.zeros((2, 2), dtype=float),
+            "true_velocity_u": np.zeros((2, 2), dtype=float),
+            "true_alpha": np.ones((2, 2), dtype=float),
+        },
+        "obs": pd.DataFrame(index=["cell_0", "cell_1"]),
+        "var": pd.DataFrame(index=["g0", "g1"]),
+        "uns": {},
+    }
+
+
+def test_apply_observation_updates_result_dict_without_mutating_input():
+    clean = _tiny_clean_result()
+    before = clean["layers"]["true_spliced"].copy()
+
+    observed = apply_observation(
+        clean,
+        seed=3,
+        count_model="poisson",
+        cell_capture_mode="lognormal",
+        cell_capture_mean=0.5,
+        cell_capture_cv=0.2,
+        observation_sample=False,
+        dropout_mode="off",
+    )
+
+    assert "spliced" not in clean["layers"]
+    assert np.array_equal(clean["layers"]["true_spliced"], before)
+    assert "spliced" in observed["layers"]
+    assert "unspliced" in observed["layers"]
+    assert "capture_efficiency" in observed["obs"]
+    assert observed["uns"]["observation_config"]["cell_capture_mode"] == "lognormal"
+    assert observed["uns"]["noise_config"]["capture_efficiency_mode"] == "cell_lognormal"
+
+
+def test_apply_observation_accepts_backward_compatible_aliases():
+    clean = _tiny_clean_result()
+    observed = apply_observation(
+        clean,
+        seed=5,
+        capture_model="poisson_capture",
+        capture_rate=0.4,
+        capture_efficiency_mode="cell_lognormal",
+        capture_efficiency_cv=0.2,
+        poisson=False,
+        dropout_rate=0.0,
+    )
+
+    assert observed["uns"]["observation_config"]["count_model"] == "poisson"
+    assert observed["uns"]["observation_config"]["cell_capture_mode"] == "lognormal"
+    assert observed["uns"]["observation_config"]["cell_capture_mean"] == 0.4
+    assert observed["uns"]["observation_config"]["observation_sample"] is False

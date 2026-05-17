@@ -33,7 +33,7 @@ from .simulate import (
     simulate,
     validate_positive_vector,
 )
-from .noise import generate_observed_counts
+from .noise import apply_observation, generate_observed_counts
 from .output import make_result_dict, to_anndata
 from .sergio_io import SergioInputs, load_sergio_targets_regs
 from .plotting import (
@@ -82,6 +82,7 @@ __all__ = [
     "sigmoid_increase",
     "sigmoid_decrease",
     "transition_weight",
+    "apply_observation",
     "generate_observed_counts",
     "make_result_dict",
     "to_anndata",

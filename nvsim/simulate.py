@@ -23,7 +23,7 @@ from .grn import (
     estimate_state_mean_expression,
 )
 from .modes import StateGraph, coerce_graph
-from .noise import _resolve_capture_model_name, generate_observed_counts
+from .noise import apply_observation
 from .output import make_result_dict
 from .production import AlphaProgram, StateProductionProfile, coerce_programs, constant
 from .regulation import compute_alpha
@@ -994,32 +994,6 @@ def _gene_metadata(
     return var
 
 
-def _observed_from_true(
-    true_u: np.ndarray,
-    true_s: np.ndarray,
-    *,
-    seed: int,
-    noise_seed: int | None,
-    capture_rate: float | None,
-    poisson_observed: bool,
-    dropout_rate: float,
-    capture_model: str | None = None,
-    capture_efficiency_mode: str = "constant",
-    capture_efficiency_cv: float = 0.0,
-) -> dict[str, np.ndarray]:
-    return generate_observed_counts(
-        true_u,
-        true_s,
-        seed=seed + 2 if noise_seed is None else noise_seed,
-        capture_rate=capture_rate,
-        poisson=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=capture_model,
-        capture_efficiency_mode=capture_efficiency_mode,
-        capture_efficiency_cv=capture_efficiency_cv,
-    )
-
-
 def _simulate_graph_impl(
     grn: GRN,
     n_cells_per_state: int | Mapping[str, int] = 60,
@@ -1271,19 +1245,6 @@ def _simulate_graph_impl(
     true_v = np.concatenate([segment["velocity"][idx] for _, segment, idx in sampled_segments], axis=0)
     true_velocity_u = np.concatenate([segment["true_velocity_u"][idx] for _, segment, idx in sampled_segments], axis=0)
     true_alpha = np.concatenate([segment["alpha"][idx] for _, segment, idx in sampled_segments], axis=0)
-    resolved_capture_model = _resolve_capture_model_name(capture_model)
-    observed = _observed_from_true(
-        true_u,
-        true_s,
-        seed=seed,
-        noise_seed=noise_seed,
-        capture_rate=capture_rate,
-        poisson_observed=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=resolved_capture_model,
-        capture_efficiency_mode=capture_efficiency_mode,
-        capture_efficiency_cv=capture_efficiency_cv,
-    )
 
     global_index_map: dict[str, np.ndarray] = {}
     cursor = 0
@@ -1318,7 +1279,6 @@ def _simulate_graph_impl(
         )
         offset += n
     obs = pd.concat(obs_frames, axis=0)
-    obs["capture_efficiency"] = observed["capture_efficiency"]
 
     time_grid = pd.concat(
         [
@@ -1373,13 +1333,7 @@ def _simulate_graph_impl(
         "transition_steepness": transition_steepness if resolved_alpha_source_mode == "state_anchor" else None,
         "half_response_calibration": half_response_calibration,
         "target_leak_alpha": "vector" if not np.isscalar(target_leak_alpha) else float(target_leak_alpha),
-        "capture_rate": capture_rate,
-        "capture_model": resolved_capture_model,
-        "capture_efficiency_mode": capture_efficiency_mode,
-        "capture_efficiency_cv": capture_efficiency_cv,
         "regulator_activity": regulator_activity,
-        "poisson_observed": poisson_observed,
-        "dropout_rate": dropout_rate,
         "return_edge_contributions": return_edge_contributions,
         "sampling_replace": any(item["sampling_replace"] for item in sampling_summary.values()),
         "n_unique_timepoints_sampled": int(sum(item["n_unique_timepoints_sampled"] for item in sampling_summary.values())),
@@ -1387,15 +1341,6 @@ def _simulate_graph_impl(
         "sampling_summary": sampling_summary,
         "time_index_scope": "segment_local",
     }
-    noise_config = {
-        "capture_model": config["capture_model"],
-        "capture_rate": capture_rate,
-        "capture_efficiency_mode": capture_efficiency_mode,
-        "capture_efficiency_cv": capture_efficiency_cv,
-        "poisson_observed": poisson_observed,
-        "dropout_rate": dropout_rate,
-    }
-
     sampled_edge_contributions = None
     if return_edge_contributions:
         sampled_edge_contributions = np.concatenate(
@@ -1409,8 +1354,8 @@ def _simulate_graph_impl(
         true_velocity=true_v,
         velocity_u=true_velocity_u,
         true_alpha=true_alpha,
-        observed_unspliced=observed["unspliced"],
-        observed_spliced=observed["spliced"],
+        observed_unspliced=None,
+        observed_spliced=None,
         obs=obs,
         var=_gene_metadata(grn, master_genes, beta=beta_series, gamma=gamma_series),
         grn=grn,
@@ -1418,7 +1363,8 @@ def _simulate_graph_impl(
         gamma=gamma_series,
         simulation_config=config,
         grn_calibration=_grn_calibration_summary(grn, master_genes, grn_calibration=grn_calibration),
-        noise_config=noise_config,
+        noise_config=None,
+        observation_config=None,
         time_grid=time_grid,
         edge_contributions=sampled_edge_contributions,
         edge_metadata=grn.to_dataframe() if sampled_edge_contributions is not None else None,
@@ -1443,7 +1389,16 @@ def _simulate_graph_impl(
         for state in states
     }
     result["uns"]["state_initialization"] = state_initialization
-    return result
+    return apply_observation(
+        result,
+        seed=seed + 2 if noise_seed is None else noise_seed,
+        capture_rate=capture_rate,
+        poisson=poisson_observed,
+        dropout_rate=dropout_rate,
+        capture_model=capture_model,
+        capture_efficiency_mode=capture_efficiency_mode,
+        capture_efficiency_cv=capture_efficiency_cv,
+    )
 
 
 def simulate(

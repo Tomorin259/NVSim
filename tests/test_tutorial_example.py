@@ -19,14 +19,13 @@ def test_tutorial_graph_examples_run_with_canonical_api():
     branching = tutorial.run_branching_tutorial()
 
     assert linear["uns"]["observation_config"]["count_model"] == "poisson"
-    assert linear["uns"]["noise_config"]["capture_model"] == "poisson_capture"
+    assert linear["uns"]["observation_config"]["cell_capture_mode"] == "constant"
     assert linear["uns"]["simulation_config"]["alpha_source_mode"] == "continuous_program"
     assert linear["uns"]["simulation_config"]["simulator"] == "graph"
     assert branching["uns"]["observation_config"]["count_model"] == "binomial"
-    assert branching["uns"]["noise_config"]["capture_model"] == "binomial_capture"
+    assert branching["uns"]["observation_config"]["cell_capture_mean"] == 0.4
     assert branching["uns"]["simulation_config"]["alpha_source_mode"] == "state_anchor"
     assert branching["uns"]["simulation_config"]["root_states"] == ["root"]
     assert branching["uns"]["simulation_config"]["transition_schedule"] == "sigmoid"
     assert linear["layers"]["true_spliced"].shape[0] == sum(tutorial.linear_parameters()["n_cells_per_state"].values())
     assert set(branching["obs"]["state"].unique()) == {"root", "branch_A", "branch_B"}
-

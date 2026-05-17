@@ -23,7 +23,6 @@ from .grn import (
     estimate_state_mean_expression,
 )
 from .modes import StateGraph, coerce_graph
-from .noise import apply_observation
 from .output import make_result_dict
 from .production import AlphaProgram, StateProductionProfile, coerce_programs, constant
 from .regulation import compute_alpha
@@ -1013,13 +1012,6 @@ def _simulate_graph_impl(
     target_leak_alpha: pd.Series | dict[str, float] | float = 0.0,
     alpha_max: float | None = None,
     seed: int = 0,
-    noise_seed: int | None = None,
-    capture_rate: float | None = None,
-    poisson_observed: bool = True,
-    dropout_rate: float = 0.0,
-    capture_model: str | None = None,
-    capture_efficiency_mode: str = "constant",
-    capture_efficiency_cv: float = 0.0,
     regulator_activity: str = "spliced",
     half_response_calibration: str = "off",
     grn_calibration: Mapping[str, object] | None = None,
@@ -1389,16 +1381,7 @@ def _simulate_graph_impl(
         for state in states
     }
     result["uns"]["state_initialization"] = state_initialization
-    return apply_observation(
-        result,
-        seed=seed + 2 if noise_seed is None else noise_seed,
-        capture_rate=capture_rate,
-        poisson=poisson_observed,
-        dropout_rate=dropout_rate,
-        capture_model=capture_model,
-        capture_efficiency_mode=capture_efficiency_mode,
-        capture_efficiency_cv=capture_efficiency_cv,
-    )
+    return result
 
 
 def simulate(

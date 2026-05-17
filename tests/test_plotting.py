@@ -7,6 +7,7 @@ import pytest
 
 from nvsim.grn import GRN
 from nvsim.modes import branching_graph, path_graph
+from nvsim.noise import apply_observation
 from nvsim.output import to_anndata
 from nvsim.plotting import (
     embed,
@@ -34,7 +35,7 @@ def _linear_result():
         ),
         genes=["g0", "g1", "g2"],
     )
-    return simulate(
+    result = simulate(
         grn,
         graph=path_graph(["early", "late"]),
         alpha_source_mode="continuous_program",
@@ -44,8 +45,8 @@ def _linear_result():
         state_time={"early": 1.0, "late": 1.0},
         dt=0.05,
         seed=21,
-        poisson_observed=False,
     )
+    return apply_observation(result, seed=23, observation_sample=False)
 
 
 def _branching_result():
@@ -70,7 +71,7 @@ def _branching_result():
             index=["root", "branch_0", "branch_1"],
         )
     )
-    return simulate(
+    result = simulate(
         grn,
         graph=branching_graph("root", ["branch_0", "branch_1"]),
         production_profile=profile,
@@ -80,8 +81,8 @@ def _branching_result():
         state_time={"root": 1.0, "branch_0": 1.0, "branch_1": 1.0},
         dt=0.05,
         seed=9,
-        poisson_observed=False,
     )
+    return apply_observation(result, seed=11, observation_sample=False)
 
 
 def test_prepare_adata_true_layers_from_result_dict():

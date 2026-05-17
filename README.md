@@ -174,35 +174,43 @@ result = simulate(
 
 Use `path_graph([...])` for chain-like trajectories and `branching_graph(root, [...])` for one-to-many branching templates. For arbitrary rooted DAGs, pass a `StateGraph` or an edge table with `parent_state` / `child_state` columns.
 
-#### 4. Choose Observed Noise
+#### 4. Apply Observation
 
-Observed-count generation supports two canonical capture models:
+`simulate(...)` returns the clean latent simulation. To generate observed raw counts, pass that result to `apply_observation(...)` explicitly:
 
-- `poisson_capture`: scale by per-cell capture efficiency centered on `capture_rate`, then optionally sample Poisson counts
-- `binomial_capture`: round latent counts, then apply molecule-level binomial capture
+```python
+from nvsim import apply_observation
 
-Recommended interpretation:
+observed = apply_observation(
+    result,
+    count_model="poisson",
+    cell_capture_mode="lognormal",
+    cell_capture_mean=0.75,
+    cell_capture_cv=0.10,
+    observation_sample=True,
+    dropout_mode="off",
+)
+```
 
-- `poisson_capture`: simple default for lightweight observation noise
-- `binomial_capture`: closest observed-noise analogue to VeloSim technical noise
+Observation parameters are grouped by source:
 
-Main noise parameters:
+- `count_model`: observed count distribution, currently `poisson` or `binomial`
+- `cell_capture_*`: cell-level measurement depth
+- `observation_sample`: whether to sample raw counts or keep continuous scaled values
+- `dropout_*`: optional extra zeroing after capture
 
-- `capture_model`
-- `capture_rate`
-- `capture_efficiency_mode`
-- `capture_efficiency_cv`
-- `dropout_rate`
-- `noise_seed`
+Low-level compatibility helpers still accept legacy capture model names such as `poisson_capture` / `binomial_capture`, but new examples should use `apply_observation(...)`.
 
 #### 5. Inspect Result
 
-Simulation returns a plain dict with these main sections:
+`simulate(...)` returns a plain dict with these main sections:
 
-- `layers`: `true_unspliced`, `true_spliced`, `true_velocity`, `true_alpha`, plus observed `unspliced` / `spliced`
+- `layers`: clean `true_unspliced`, `true_spliced`, `true_velocity`, `true_velocity_u`, and `true_alpha`
 - `obs`: cell-level metadata such as pseudotime, state labels, and sampling indices (`branch` is kept as a compatibility alias)
 - `var`: gene-level metadata such as `gene_role`, `gene_class`, `true_beta`, and `true_gamma`
 - `uns`: configs and auxiliary metadata such as `true_grn`, `kinetic_params`, `simulation_config`, and `grn_calibration`
+
+After `apply_observation(...)`, the returned object also contains observed `unspliced` / `spliced`, `obs["capture_efficiency"]`, and `uns["observation_config"]`.
 
 Use `to_anndata()` if you want an AnnData object for downstream analysis.
 
@@ -385,35 +393,43 @@ result = simulate(
 
 链式轨迹用 `path_graph([...])`；一对多分支可以用 `branching_graph(root, [...])`；更一般的 rooted DAG 可以直接传 `StateGraph` 或包含 `parent_state` / `child_state` 两列的 edge table。
 
-#### 4. Choose Observed Noise
+#### 4. Apply Observation
 
-当前 observed noise 只有两种 canonical capture model：
+`simulate(...)` 只返回 clean 的潜在模拟结果。如果要生成带观测噪声的 raw counts，需要显式调用 `apply_observation(...)`：
 
-- `poisson_capture`：先按以 `capture_rate` 为中心的逐细胞 capture efficiency 缩放，再可选做 Poisson 采样
-- `binomial_capture`：先把 latent count 四舍五入，再做逐分子的 binomial capture
+```python
+from nvsim import apply_observation
 
-可以这样理解：
+observed = apply_observation(
+    result,
+    count_model="poisson",
+    cell_capture_mode="lognormal",
+    cell_capture_mean=0.75,
+    cell_capture_cv=0.10,
+    observation_sample=True,
+    dropout_mode="off",
+)
+```
 
-- `poisson_capture`：轻量默认噪声
-- `binomial_capture`：在 observed noise 语义上最接近 VeloSim technical noise
+观测层参数按来源拆开：
 
-最常调的噪声参数是：
+- `count_model`：观测 count 的分布，目前支持 `poisson` 或 `binomial`
+- `cell_capture_*`：细胞级测量深浅，也就是每个细胞整体测到多少
+- `observation_sample`：是否真正采样成 raw counts，还是保留连续缩放值
+- `dropout_*`：capture 之后额外做零膨胀
 
-- `capture_model`
-- `capture_rate`
-- `capture_efficiency_mode`
-- `capture_efficiency_cv`
-- `dropout_rate`
-- `noise_seed`
+底层兼容函数仍然接受 `poisson_capture` / `binomial_capture` 这类旧名字，但新的 example 和公开用法应优先使用 `apply_observation(...)`。
 
 #### 5. Inspect Result
 
-模拟结果是一个 plain dict，重点看四块：
+`simulate(...)` 的结果是一个 plain dict，重点看四块：
 
-- `layers`：`true_unspliced`、`true_spliced`、`true_velocity`、`true_alpha`，以及 observed `unspliced` / `spliced`
+- `layers`：clean 的 `true_unspliced`、`true_spliced`、`true_velocity`、`true_velocity_u` 和 `true_alpha`
 - `obs`：细胞级元数据，例如 pseudotime、branch、sampling index
 - `var`：基因级元数据，例如 `gene_role`、`gene_class`、`true_beta`、`true_gamma`
 - `uns`：配置和辅助元数据，例如 `true_grn`、`kinetic_params`、`simulation_config`、`grn_calibration`
+
+经过 `apply_observation(...)` 后，结果里会额外有 observed `unspliced` / `spliced`、`obs["capture_efficiency"]` 和 `uns["observation_config"]`。
 
 如果你要接下游分析，可以用 `to_anndata()` 转成 AnnData。
 

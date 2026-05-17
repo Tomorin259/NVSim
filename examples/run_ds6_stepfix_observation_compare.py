@@ -36,12 +36,13 @@ STATE_COLORS = {
     "bin_4": "#B07AA1",
     "bin_5": "#76B7B2",
 }
-NOISE_PARAMS = {
-    "capture_model": "poisson_capture",
-    "capture_rate": 0.75,
-    "capture_efficiency_mode": "cell_lognormal",
-    "capture_efficiency_cv": 0.10,
-    "poisson": True,
+OBSERVATION_PARAMS = {
+    "count_model": "poisson",
+    "cell_capture_mode": "lognormal",
+    "cell_capture_mean": 0.75,
+    "cell_capture_cv": 0.10,
+    "observation_sample": True,
+    "dropout_mode": "off",
     "dropout_rate": 0.0,
     "seed": 17,
 }
@@ -249,14 +250,14 @@ def main() -> None:
     )
     noisy_raw = apply_observation(
         src,
-        seed=NOISE_PARAMS["seed"],
-        count_model="poisson",
-        cell_capture_mode="lognormal",
-        cell_capture_mean=NOISE_PARAMS["capture_rate"],
-        cell_capture_cv=NOISE_PARAMS["capture_efficiency_cv"],
-        observation_sample=NOISE_PARAMS["poisson"],
-        dropout_mode="off" if NOISE_PARAMS["dropout_rate"] == 0.0 else "bernoulli",
-        dropout_rate=NOISE_PARAMS["dropout_rate"],
+        seed=OBSERVATION_PARAMS["seed"],
+        count_model=OBSERVATION_PARAMS["count_model"],
+        cell_capture_mode=OBSERVATION_PARAMS["cell_capture_mode"],
+        cell_capture_mean=OBSERVATION_PARAMS["cell_capture_mean"],
+        cell_capture_cv=OBSERVATION_PARAMS["cell_capture_cv"],
+        observation_sample=OBSERVATION_PARAMS["observation_sample"],
+        dropout_mode=OBSERVATION_PARAMS["dropout_mode"],
+        dropout_rate=OBSERVATION_PARAMS["dropout_rate"],
     )
 
     clean_raw_path = OUTPUT_DIR / "ds6_stepfix_obs_clean_raw.h5ad"
@@ -292,7 +293,7 @@ def main() -> None:
     summary = {
         "input_h5ad": str(INPUT_H5AD),
         "output_dir": str(OUTPUT_DIR),
-        "noise_params": NOISE_PARAMS,
+        "observation_params": OBSERVATION_PARAMS,
         "scvelo_preprocess": SCV_PARAMS,
         "clean_arrow_style": CLEAN_ARROW_STYLE,
         "state_order": STATE_ORDER,

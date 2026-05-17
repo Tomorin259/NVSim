@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 
 from nvsim.grn import GRN
 from nvsim.modes import StateGraph, branching_graph, path_graph
+from nvsim.noise import apply_observation
 from nvsim.output import to_anndata
 from nvsim.production import StateProductionProfile, linear_increase, sigmoid_decrease
 from nvsim.simulate import simulate
@@ -85,10 +86,6 @@ def linear_parameters() -> dict[str, object]:
             "g2": sigmoid_decrease(1.0, 0.3),
         },
         "regulator_activity": "spliced",
-        "capture_model": "poisson_capture",
-        "capture_rate": 0.5,
-        "poisson_observed": True,
-        "dropout_rate": 0.02,
         "seed": 11,
     }
 
@@ -108,22 +105,38 @@ def branching_parameters() -> dict[str, object]:
         "transition_midpoint": 0.5,
         "transition_steepness": 10.0,
         "regulator_activity": "spliced",
-        "capture_model": "binomial_capture",
-        "capture_rate": 0.4,
-        "poisson_observed": True,
-        "dropout_rate": 0.03,
         "seed": 17,
     }
 
 
 def run_linear_tutorial() -> dict:
-    return simulate(build_tutorial_grn(), graph=linear_graph(), **linear_parameters())
+    result = simulate(build_tutorial_grn(), graph=linear_graph(), **linear_parameters())
+    return apply_observation(
+        result,
+        seed=13,
+        count_model="poisson",
+        cell_capture_mode="constant",
+        cell_capture_mean=0.5,
+        observation_sample=True,
+        dropout_mode="bernoulli",
+        dropout_rate=0.02,
+    )
 
 
 def run_branching_tutorial() -> dict:
     params = branching_parameters().copy()
     graph = params.pop("graph")
-    return simulate(build_tutorial_grn(), graph=graph, **params)
+    result = simulate(build_tutorial_grn(), graph=graph, **params)
+    return apply_observation(
+        result,
+        seed=19,
+        count_model="binomial",
+        cell_capture_mode="constant",
+        cell_capture_mean=0.4,
+        observation_sample=True,
+        dropout_mode="bernoulli",
+        dropout_rate=0.03,
+    )
 
 
 def _write_if_possible(result: dict, path: Path) -> None:

@@ -49,7 +49,6 @@ def test_sergio_differentiation_mode_resolves_expected_defaults():
         state_time=0.4,
         dt=0.1,
         seed=9,
-        poisson_observed=False,
     )
     config = result["uns"]["simulation_config"]
 
@@ -75,7 +74,6 @@ def test_sergio_differentiation_children_start_from_parent_steady_state_by_defau
         state_time=0.4,
         dt=0.1,
         seed=4,
-        poisson_observed=False,
     )
 
     steady = result["uns"]["state_steady_states"]["root"]["u"]

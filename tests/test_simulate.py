@@ -4,6 +4,7 @@ import pytest
 
 from nvsim.grn import GRN
 from nvsim.modes import path_graph
+from nvsim.noise import apply_observation
 from nvsim.production import linear_increase, sigmoid_decrease
 from nvsim.simulate import simulate
 
@@ -50,7 +51,6 @@ def _chain_kwargs():
         "state_time": {"early": 1.0, "late": 1.0},
         "dt": 0.05,
         "seed": 31,
-        "poisson_observed": False,
     }
 
 
@@ -83,12 +83,15 @@ def test_output_dimensions_are_correct():
 
 def test_cell_lognormal_capture_efficiency_is_recorded_in_obs_and_config():
     grn = _small_grn()
-    result = simulate(
-        grn,
-        **_chain_kwargs(),
-        capture_rate=0.5,
-        capture_efficiency_mode="cell_lognormal",
-        capture_efficiency_cv=0.2,
+    clean = simulate(grn, **_chain_kwargs())
+    result = apply_observation(
+        clean,
+        seed=33,
+        count_model="poisson",
+        cell_capture_mode="lognormal",
+        cell_capture_mean=0.5,
+        cell_capture_cv=0.2,
+        observation_sample=False,
     )
 
     eff = result["obs"]["capture_efficiency"].to_numpy()
@@ -133,7 +136,6 @@ def test_sampling_without_replacement_is_default():
             state_time={"s0": 0.2},
             dt=0.1,
             seed=11,
-            poisson_observed=False,
         )
 
 
@@ -149,7 +151,6 @@ def test_sampling_replacement_can_be_enabled_and_is_recorded():
         state_time={"s0": 0.2},
         dt=0.1,
         seed=11,
-        poisson_observed=False,
         allow_snapshot_replacement=True,
     )
 

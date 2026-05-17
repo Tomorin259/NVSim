@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from nvsim.modes import StateGraph
+from nvsim.noise import apply_observation
 from nvsim.output import to_anndata
 from nvsim.plotting import plot_gene_dynamics, plot_phase_gallery, plot_showcase
 from nvsim.production import StateProductionProfile
@@ -113,10 +114,16 @@ def build_result(output_dir: Path = DEFAULT_OUTPUT_DIR) -> dict[str, object]:
         root_time=3.0,
         state_time=state_time,
         dt=0.01,
-        capture_rate=1.0,
-        poisson_observed=False,
-        dropout_rate=0.0,
         seed=7,
+    )
+    result = apply_observation(
+        result,
+        seed=9,
+        count_model="poisson",
+        cell_capture_mode="constant",
+        cell_capture_mean=1.0,
+        observation_sample=False,
+        dropout_mode="off",
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     return {

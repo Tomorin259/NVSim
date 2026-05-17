@@ -43,7 +43,6 @@ def test_state_anchor_step_uses_child_alpha_throughout_child_state():
         state_time={"early": 1.0, "late": 1.0},
         dt=0.05,
         seed=19,
-        poisson_observed=False,
         transition_schedule="step",
     )
 

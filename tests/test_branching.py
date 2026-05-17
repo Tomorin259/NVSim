@@ -4,6 +4,7 @@ import pytest
 
 from nvsim.grn import GRN
 from nvsim.modes import branching_graph
+from nvsim.noise import apply_observation
 from nvsim.production import StateProductionProfile
 from nvsim.simulate import simulate
 
@@ -44,7 +45,6 @@ def _branching_kwargs():
         "state_time": {"root": 1.0, "branch_0": 1.2, "branch_1": 1.2},
         "dt": 0.05,
         "seed": 5,
-        "poisson_observed": False,
     }
 
 
@@ -130,10 +130,11 @@ def test_branching_output_contains_standardized_metadata():
     assert len(config["graph_edges"]) == 2
 
 
-def test_branching_capture_model_metadata_is_recorded():
-    result = simulate(_graph_grn(), **_branching_kwargs(), capture_model="binomial_capture", capture_rate=0.5)
+def test_branching_observation_metadata_is_recorded():
+    clean = simulate(_graph_grn(), **_branching_kwargs())
+    result = apply_observation(clean, count_model="binomial", cell_capture_mean=0.5)
     assert result["uns"]["observation_config"]["count_model"] == "binomial"
-    assert result["uns"]["noise_config"]["capture_model"] == "binomial_capture"
+    assert result["uns"]["observation_config"]["cell_capture_mean"] == 0.5
 
 
 def test_sergio_differentiation_defaults_to_sergio_kinetics():
@@ -165,7 +166,6 @@ def test_branching_sampling_without_replacement_is_default():
             state_time={"root": 0.2, "branch_0": 0.2, "branch_1": 0.2},
             dt=0.1,
             seed=11,
-            poisson_observed=False,
         )
 
 
@@ -180,7 +180,6 @@ def test_branching_sampling_replacement_can_be_enabled_and_is_recorded():
         state_time={"root": 0.2, "branch_0": 0.2, "branch_1": 0.2},
         dt=0.1,
         seed=11,
-        poisson_observed=False,
         allow_snapshot_replacement=True,
     )
     assert result["uns"]["simulation_config"]["sampling_replace"] is True

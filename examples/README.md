@@ -57,7 +57,6 @@ python examples/run_ds6_stepfix_observation_compare.py
 ```
 
 ## Output Naming
-## DS6 Artifact Naming
 
 For the canonical DS6 stepfix outputs, file names now encode the processing stage explicitly:
 
@@ -93,3 +92,19 @@ Current generated output groups are:
 - `examples/outputs/ds6_pt_s3_c300_stepfix/`: canonical DS6 benchmark rerun with corrected `step` transitions and full diagnostics.
 - `examples/outputs/ds6_pt_s3_c300_stepfix/obs_compare_tuned/`: canonical clean vs tuned-noisy observation comparison for DS6 stepfix.
 - `examples/outputs/ds6_pt_s3_c300_stepfix_kinsergio/`: the same benchmark with fixed SERGIO kinetics for controlled comparison.
+
+## DS6 Canonical vs Legacy
+
+Within `examples/outputs/ds6_pt_s3_c300_stepfix/`:
+
+- Canonical reusable artifacts:
+  - `ds6_stepfix_clean_simulation.h5ad`
+  - `official_style_scanpy_scvelo/`
+  - `regulation_diagnostics/`
+  - `velocity_showcase/`
+  - `obs_compare_tuned/`
+- Legacy exploratory directories kept only for historical comparison:
+  - `phase_portrait_utils_scvelo_moments_clean_vs_noisy/`
+  - `phase_portrait_utils_scvelo_moments_clean_vs_noisy_tuned/`
+
+Prefer the canonical directories above for all new analysis and scripts.
